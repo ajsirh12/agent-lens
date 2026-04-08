@@ -1,0 +1,76 @@
+Screen {
+    layout: vertical;
+}
+
+#main {
+    layout: horizontal;
+    height: 1fr;
+}
+
+#main.vpanes {
+    layout: vertical;
+}
+
+#timeline {
+    width: 1fr;
+    border: solid $primary;
+}
+
+#flowchart {
+    width: 1fr;
+    border: solid $accent;
+    overflow-x: auto;
+    overflow-y: auto;
+    scrollbar-size: 1 1;
+}
+
+#main.vpanes #timeline {
+    width: 1fr;
+    height: 1fr;
+}
+
+#main.vpanes #flowchart {
+    width: 1fr;
+    height: 1fr;
+}
+
+#flowchart-canvas {
+    width: auto;
+    height: auto;
+}
+
+#status-footer {
+    height: 1;
+    dock: bottom;
+    background: $panel;
+    color: $text;
+    padding: 0 1;
+}
+
+.placeholder {
+    color: $text-muted;
+    padding: 1 2;
+}
+
+SessionPickerScreen {
+    align: center middle;
+}
+
+#picker-body {
+    width: 90;
+    max-width: 95%;
+    height: auto;
+    max-height: 80%;
+    border: thick $accent;
+    background: $panel;
+    padding: 1 2;
+}
+
+#picker-title {
+    padding-bottom: 1;
+}
+
+#picker-list {
+    height: auto;
+    max-height: 20;
+}
