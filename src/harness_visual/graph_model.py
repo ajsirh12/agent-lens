@@ -104,6 +104,22 @@ def _is_real_user_prompt(ev: HarnessEvent) -> bool:
 
 
 @dataclass
+class Instance:
+    """A single live spawn of an agent node.
+
+    Phase 1 of mode-dependent instance view: tracks per-spawn lifecycle so
+    running-mode rendering can show one box per parallel invocation while
+    all-mode keeps the aggregated view.
+    """
+
+    tool_use_id: str
+    status: NodeStatus = "running"
+    started_ts: float = 0.0
+    ended_ts: float | None = None
+    subagent_uuid: str | None = None
+
+
+@dataclass
 class Node:
     id: str
     label: str
@@ -118,6 +134,10 @@ class Node:
     # Aggregated tool-call counts observed inside the linked subagent
     # conversation. Keyed by sanitized tool name.
     tool_breakdown: dict[str, int] = field(default_factory=dict)
+    # Per-spawn instances keyed by tool_use_id. Only populated for top
+    # level agent spawns (``_handle_tool_use``); nested spawns remain
+    # aggregated in Phase 1. Insertion order = spawn order.
+    _instances: dict[str, "Instance"] = field(default_factory=dict)
 
 
 @dataclass
@@ -199,12 +219,18 @@ class CallGraph:
                 return False
             # New user turn — flush the sticky-running set so nodes from
             # the previous turn transition to their real done/error state
-            # on the next render. Returns True only if the set actually
-            # had anything to clear, otherwise the render can be skipped.
+            # on the next render. Also clear per-node _instances so the
+            # running-mode instance view only shows spawns from the
+            # *current* turn, not accumulated session history.
+            changed = False
             if self._current_turn:
                 self._current_turn.clear()
-                return True
-            return False
+                changed = True
+            for node in self.nodes.values():
+                if node._instances:
+                    node._instances.clear()
+                    changed = True
+            return changed
         return False
 
     def _handle_tool_use(self, ev: HarnessEvent) -> bool:
@@ -286,6 +312,15 @@ class CallGraph:
         tid = ev.tool_use_id
         if tid:
             self._tool_use_to_node[tid] = child_id
+            # Record a per-spawn Instance so running-mode can show one
+            # box per live invocation. Only top-level agent spawns get
+            # instances in Phase 1; nested spawns stay aggregated.
+            if ntype == "agent":
+                self.nodes[child_id]._instances[tid] = Instance(
+                    tool_use_id=tid,
+                    status="running",
+                    started_ts=ts_epoch,
+                )
 
         return changed
 
@@ -316,6 +351,21 @@ class CallGraph:
         if node.status != new_status:
             node.status = new_status
             changed = True
+        # Update the matching per-spawn instance (Phase 1: only top-level
+        # agent spawns have instances; nested spawns skip this branch).
+        # Idempotent: only touch the instance while it is still running
+        # so a duplicate tool_result stays a no-op.
+        instance = node._instances.get(tid)
+        if instance is not None and instance.ended_ts is None:
+            ts_epoch = ev.ts.timestamp() if ev.ts is not None else 0.0
+            if instance.status != new_status:
+                instance.status = new_status
+                changed = True
+            instance.ended_ts = ts_epoch
+            changed = True
+            if linked and instance.subagent_uuid != linked:
+                instance.subagent_uuid = linked
+                changed = True
         return changed
 
     def _handle_subagent_tool_use(self, ev: HarnessEvent) -> bool:

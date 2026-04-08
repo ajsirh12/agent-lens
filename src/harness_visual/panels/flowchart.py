@@ -170,6 +170,12 @@ class FlowchartPanel(ScrollableContainer):
         actual status is 'running' OR it was touched in the current
         turn (fast agents that already flipped to 'done' but the user
         hasn't started a new turn yet).
+
+        Phase 1 mode-dependent instance view: if a surviving node has
+        tracked ``_instances`` (only top-level agent spawns do), expand
+        it into one virtual node per instance so parallel invocations
+        show up as separate boxes. Nodes without instances (root, nested
+        children, skills) pass through unchanged.
         """
         sub = CallGraph()
         keep: set[str] = {ROOT_ID}
@@ -178,20 +184,69 @@ class FlowchartPanel(ScrollableContainer):
                 continue
             if node.status == "running" or self._graph.is_in_current_turn(nid):
                 keep.add(nid)
+
+        # Track virtual ids grouped by their original node id so edge
+        # rewiring below can fan out to every instance.
+        expansions: dict[str, list[str]] = {}
+        for nid in keep:
+            if nid == ROOT_ID:
+                continue
+            node = self._graph.nodes[nid]
+            # Only expand when there are 2+ parallel instances —
+            # single-spawn agents keep their canonical id (and existing
+            # tests / cross-highlight behavior) unchanged.
+            if node.node_type == "agent" and len(node._instances) >= 2:
+                vids: list[str] = []
+                for tid, inst in node._instances.items():
+                    # Claude Code tool_use_ids are of the form
+                    # ``toolu_<random>``. Slicing ``tid[:6]`` gives the
+                    # same ``toolu_`` prefix for every call, which
+                    # collapses all instances to one virtual node via
+                    # dict-key collision. Use the TAIL of the id so
+                    # each suffix is unique.
+                    short_tid = tid[-8:] if len(tid) >= 8 else tid
+                    vid = f"{nid}#{short_tid}"
+                    sub.nodes[vid] = Node(
+                        id=vid,
+                        label=node.label,
+                        node_type="agent",
+                        status=inst.status,
+                        call_count=1,
+                        last_ts=inst.started_ts,
+                        tool_breakdown=dict(node.tool_breakdown),
+                    )
+                    vids.append(vid)
+                expansions[nid] = vids
+            else:
                 sub.nodes[nid] = node
-        # Re-add only edges whose endpoints both survived. If a live
-        # child's true parent was filtered out, re-parent it onto root
-        # so it stays visible.
+
+        # Re-add edges. For expanded children, fan out to every virtual
+        # instance. If the true parent was filtered out, re-parent onto
+        # root so the child stays visible.
         for (pid, cid), edge in self._graph.edges.items():
             if cid not in keep:
                 continue
-            if pid in keep:
-                sub.edges[(pid, cid)] = edge
-            else:
-                sub.edges[(ROOT_ID, cid)] = Edge(
-                    parent_id=ROOT_ID, child_id=cid, count=edge.count
+            src = pid if pid in sub.nodes or pid == ROOT_ID else ROOT_ID
+            if src != ROOT_ID and src not in sub.nodes:
+                src = ROOT_ID
+            child_targets = expansions.get(cid, [cid])
+            for tgt in child_targets:
+                sub.edges[(src, tgt)] = Edge(
+                    parent_id=src, child_id=tgt, count=1
                 )
         return sub
+
+    @staticmethod
+    def _base_node_id(nid: str | None) -> str | None:
+        """Strip the ``#<tid>`` suffix added to virtual instance nodes.
+
+        Running-mode may expand a node ``agent:executor`` into virtual
+        ids like ``agent:executor#a1b2c3``. Cross-highlight uses the
+        canonical base id so timeline matching works without changes.
+        """
+        if not nid:
+            return nid
+        return nid.split("#", 1)[0]
 
     # ------------------------------------------------------------------
     def _refresh_canvas(self) -> None:
@@ -242,8 +297,12 @@ class FlowchartPanel(ScrollableContainer):
             selected = self.app.selected_agent_id  # type: ignore[attr-defined]
         except Exception:
             selected = None
+        selected_base = self._base_node_id(selected)
         for nid, pos in layout.nodes.items():
-            self._draw_box(grid, pos, highlight=(nid == selected))
+            node_base = self._base_node_id(nid)
+            self._draw_box(
+                grid, pos, highlight=(node_base == selected_base and selected_base is not None)
+            )
 
         # Convert grid to a single Text.
         text = Text()
@@ -276,8 +335,14 @@ class FlowchartPanel(ScrollableContainer):
         # running color even if their tool_result already flipped them
         # to done/error. They'll flush to their real status on the next
         # user_message event.
+        # Effective status: nodes touched in the current turn keep the
+        # running color even if their tool_result already flipped them
+        # to done/error. Virtual instance nodes (``agent:name#tid``)
+        # must check the BASE id against _current_turn since the raw
+        # graph only knows the canonical form.
         effective_status = node.status
-        if self._graph.is_in_current_turn(node.id):
+        base_id = self._base_node_id(node.id)
+        if base_id and self._graph.is_in_current_turn(base_id):
             effective_status = "running"
         style = STATUS_STYLE.get(effective_status, "")
         if highlight:
@@ -355,7 +420,11 @@ class FlowchartPanel(ScrollableContainer):
             if pos.row <= y < pos.row + pos.height and pos.col <= x < pos.col + pos.width:
                 self._updating = True
                 try:
-                    self.app.selected_agent_id = nid  # type: ignore[attr-defined]
+                    # Virtual instance ids (``agent:foo#tid``) are
+                    # flattened to their canonical base so cross-
+                    # highlight and timeline matching work unchanged.
+                    base = self._base_node_id(nid)
+                    self.app.selected_agent_id = base  # type: ignore[attr-defined]
                 except Exception:
                     pass
                 finally:
