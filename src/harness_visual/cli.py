@@ -63,8 +63,8 @@ def main(argv: list[str] | None = None) -> int:
         no_attach=args.no_attach,
         auto_latest=args.latest,
     )
-    app.run()
-    return 0
+    result = app.run()
+    return result if isinstance(result, int) else 0
 
 
 if __name__ == "__main__":

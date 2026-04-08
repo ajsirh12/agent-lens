@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+# A single line exceeding 1 MiB is either corrupted or adversarial; discard
+# rather than OOM.
+MAX_BUFFER_BYTES = 1_048_576
+
 from .bus import EventBus
 from .events import HarnessEvent
 from .parser import parse_line
@@ -60,10 +64,17 @@ class SessionWatcher:
             self._inode = st.st_ino
             self._offset = 0
             self._buffer = b""
+            # Clear stale fingerprint so the next tick captures a fresh one
+            # from the new file, preventing a spurious second rotation trigger.
+            self._head_fingerprint = b""
         if st.st_size < self._offset:
             log.debug("truncation detected on %s, resetting offset", self.path)
             self._offset = 0
             self._buffer = b""
+            # Clear stale fingerprint so the next tick captures a fresh one
+            # from the truncated/rewritten file, preventing a spurious second
+            # rotation trigger.
+            self._head_fingerprint = b""
 
         # Fingerprint check — only meaningful when mtime advanced.
         if self._mtime_ns and st.st_mtime_ns != self._mtime_ns:
@@ -76,6 +87,10 @@ class SessionWatcher:
                 log.debug("head fingerprint changed on %s, resetting offset", self.path)
                 self._offset = 0
                 self._buffer = b""
+                # Clear stale fingerprint so the next tick captures a fresh one
+                # from the rewritten file, preventing a spurious second rotation
+                # trigger on the following tick.
+                self._head_fingerprint = b""
             if head:
                 self._head_fingerprint = head
 
@@ -96,6 +111,11 @@ class SessionWatcher:
         data = self._buffer + chunk
         if b"\n" not in data:
             self._buffer = data
+            if len(self._buffer) > MAX_BUFFER_BYTES:
+                log.debug(
+                    "dropping oversized line: %d bytes", len(self._buffer)
+                )
+                self._buffer = b""
             return []
         *lines, tail = data.split(b"\n")
         self._buffer = tail
@@ -160,7 +180,16 @@ class WatchfilesTailer(SessionWatcher):
         except ImportError:
             log.debug("watchfiles unavailable, using PollingTailer")
             fallback = PollingTailer(self.path)
+            # Copy ALL tailer state so the fallback continues exactly where
+            # this tailer left off.  Copying only _offset would cause the next
+            # tick to see _inode=None, trigger a spurious rotation, and
+            # re-deliver every already-processed line; omitting _buffer would
+            # also lose any in-flight partial line.
             fallback._offset = self._offset
+            fallback._inode = self._inode
+            fallback._mtime_ns = self._mtime_ns
+            fallback._buffer = self._buffer
+            fallback._head_fingerprint = self._head_fingerprint
             await fallback.run(app=app, bus=bus, stop_event=stop_event)
             return
 

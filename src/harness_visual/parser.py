@@ -17,6 +17,14 @@ from .events import EventType, HarnessEvent
 
 log = logging.getLogger(__name__)
 
+# Cap raw_line storage: a 50 MB line held by thousands of timeline rows would
+# cause multi-GB retention. 8 KiB is sufficient for debugging.
+MAX_RAW_LINE = 8192
+
+
+def _truncate(s: str) -> str:
+    return s[:MAX_RAW_LINE]
+
 # Matches the "agentId: <hash>" preamble embedded in a main-session
 # tool_result block when an Agent tool spawn has completed. The hash is a
 # 12+ hex-char identifier that also forms the filename of the subagent
@@ -110,7 +118,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=datetime.now(timezone.utc),
                 agent_id=None,
                 payload={"error": str(e)},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
     if not isinstance(obj, dict):
@@ -120,7 +128,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=datetime.now(timezone.utc),
                 agent_id=None,
                 payload={"reason": "not an object"},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
 
@@ -147,7 +155,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=ts,
                 agent_id=agent_id,
                 payload={"top_type": top_type},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
 
@@ -159,7 +167,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=ts,
                 agent_id=agent_id,
                 payload={"message_id": obj.get("messageId")},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
     if top_type == "attachment":
@@ -169,7 +177,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=ts,
                 agent_id=agent_id,
                 payload={"attachment": obj.get("attachment")},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
     if top_type == "permission-mode":
@@ -179,7 +187,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=ts,
                 agent_id=agent_id,
                 payload={"mode": obj.get("permissionMode")},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
 
@@ -198,7 +206,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 ts=ts,
                 agent_id=agent_id,
                 payload={"uuid": obj.get("uuid")},
-                raw_line=line,
+                raw_line=_truncate(line),
             )
         ]
 
@@ -213,7 +221,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                     ts=ts,
                     agent_id=agent_id,
                     payload={"content_type": bt},
-                    raw_line=line,
+                    raw_line=_truncate(line),
                 )
             )
             continue
@@ -230,7 +238,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                         "parent_tool_use_id": block.get("parent_tool_use_id"),
                         "uuid": obj.get("uuid"),
                     },
-                    raw_line=line,
+                    raw_line=_truncate(line),
                 )
             )
         elif bt == "tool_result":
@@ -249,7 +257,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                     ts=ts,
                     agent_id=agent_id,
                     payload=payload,
-                    raw_line=line,
+                    raw_line=_truncate(line),
                 )
             )
         elif bt == "text":
@@ -268,7 +276,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                     ts=ts,
                     agent_id=agent_id,
                     payload=text_payload,
-                    raw_line=line,
+                    raw_line=_truncate(line),
                 )
             )
         elif bt == "thinking":
@@ -278,7 +286,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
                     ts=ts,
                     agent_id=agent_id,
                     payload={"thinking": (block.get("thinking") or "")[:500]},
-                    raw_line=line,
+                    raw_line=_truncate(line),
                 )
             )
     # Stamp subagent_uuid on every emitted event from a subagent-file row
