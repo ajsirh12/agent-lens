@@ -184,10 +184,23 @@ class HarnessVisualApp(App[int]):
             pass
         return f"  nodes: {n} edges: {e}  [{mode_tag}/{orient_tag}/{pane_tag}]"
 
+    def _short_session_path(self) -> str:
+        """Compact form of active_session_path that fits narrow terminals.
+
+        Returns just the filename of the active session, since the
+        parent directory (the slugged project dir under ~/.claude/projects)
+        is always the same for a given project and adds no information
+        the user can't derive from their cwd. A typical Claude Code
+        session file ``b0709256-....jsonl`` is ~41 chars.
+        """
+        if self.active_session_path is None:
+            return "(none)"
+        return self.active_session_path.name
+
     def _update_footer(self) -> None:
         if self._footer is None:
             return
-        path = str(self.active_session_path) if self.active_session_path else "(none)"
+        path = self._short_session_path()
         self._footer.update(
             f"session: {path} [{self.locator_reason}]{self._flowchart_counts_suffix()}"
         )
@@ -200,7 +213,7 @@ class HarnessVisualApp(App[int]):
         idle_suffix = ""
         if last > 0 and (now - last) > 30:
             idle_suffix = "  — session idle"
-        path = str(self.active_session_path)
+        path = self._short_session_path()
         self._footer.update(
             f"session: {path} [{self.locator_reason}]{idle_suffix}"
             f"{self._flowchart_counts_suffix()}"
