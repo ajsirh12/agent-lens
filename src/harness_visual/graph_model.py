@@ -117,6 +117,12 @@ class Instance:
     started_ts: float = 0.0
     ended_ts: float | None = None
     subagent_uuid: str | None = None
+    # Per-instance tool-call counts (Phase 2a). Mirrors the node-level
+    # ``tool_breakdown`` aggregate but scoped to a single spawn so the
+    # running-mode instance view can show distinct badges per parallel
+    # invocation. Capped independently from the node aggregate so a
+    # runaway instance can't poison the parent's badge.
+    tool_breakdown: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,6 +163,12 @@ class CallGraph:
     # tool_use events from subagent files back to the existing Agent
     # node rather than spawning ghost nodes on the graph.
     _subagent_uuid_to_node: dict[str, str] = field(default_factory=dict)
+    # subagent JSONL agentId -> (node_id, tool_use_id) of the Instance it
+    # was linked to. Lets per-instance tool_breakdown (Phase 2a) attribute
+    # subagent tool_use events to the specific spawn that produced them.
+    _subagent_uuid_to_instance: dict[str, tuple[str, str]] = field(
+        default_factory=dict
+    )
     # Node ids that were touched (spawned/re-invoked) during the current
     # user turn. These remain displayed as "running" until the next
     # user_message event clears the set, so the user has time to observe
@@ -230,6 +242,13 @@ class CallGraph:
                 if node._instances:
                     node._instances.clear()
                     changed = True
+            # Phase 2a: drop the instance index too so stale subagent_uuid
+            # entries don't leak into the next turn. Node-level
+            # tool_breakdown is intentionally preserved (all-mode session
+            # persistence semantics).
+            if self._subagent_uuid_to_instance:
+                self._subagent_uuid_to_instance.clear()
+                changed = True
             return changed
         return False
 
@@ -347,6 +366,13 @@ class CallGraph:
             if self._subagent_uuid_to_node.get(linked) != node.id:
                 self._subagent_uuid_to_node[linked] = node.id
                 changed = True
+            # Phase 2a: also index the linked subagent_uuid back to the
+            # specific Instance so subagent tool_use events can update
+            # per-spawn breakdown. Only meaningful when the Instance
+            # actually exists (top-level agent spawns).
+            instance = node._instances.get(tid)
+            if instance is not None:
+                self._subagent_uuid_to_instance[linked] = (node.id, tid)
         new_status: NodeStatus = "error" if ev.is_error else "done"
         if node.status != new_status:
             node.status = new_status
@@ -401,14 +427,33 @@ class CallGraph:
         if not name:
             return False
         breakdown = node.tool_breakdown
+        node_changed = False
         if name in breakdown:
             breakdown[name] += 1
-            return True
-        # Enforce per-node breakdown cap against untrusted payloads.
-        if len(breakdown) >= MAX_BREAKDOWN_TOOLS:
-            return False
-        breakdown[name] = 1
-        return True
+            node_changed = True
+        elif len(breakdown) < MAX_BREAKDOWN_TOOLS:
+            # Enforce per-node breakdown cap against untrusted payloads.
+            breakdown[name] = 1
+            node_changed = True
+        # Phase 2a: also update the per-instance breakdown when the
+        # subagent_uuid is indexed to a specific Instance. Cap is enforced
+        # independently here so a runaway instance can't poison the node
+        # aggregate or vice versa. Orphan instances (no link) skip this
+        # branch silently and only contribute to the node-level total.
+        inst_ref = self._subagent_uuid_to_instance.get(str(sub_uuid))
+        if inst_ref is not None:
+            n_id, t_id = inst_ref
+            n = self.nodes.get(n_id)
+            if n is not None:
+                inst = n._instances.get(t_id)
+                if inst is not None:
+                    inst_breakdown = inst.tool_breakdown
+                    if name in inst_breakdown:
+                        inst_breakdown[name] += 1
+                    elif len(inst_breakdown) < MAX_BREAKDOWN_TOOLS:
+                        inst_breakdown[name] = 1
+                    # if cap exceeded, silently drop — no error
+        return node_changed
 
     def _handle_nested_spawn(self, ev: HarnessEvent) -> bool:
         """Create a child node for an Agent/Task/Skill spawn emitted

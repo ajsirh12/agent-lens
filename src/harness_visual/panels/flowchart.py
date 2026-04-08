@@ -213,7 +213,7 @@ class FlowchartPanel(ScrollableContainer):
                         status=inst.status,
                         call_count=1,
                         last_ts=inst.started_ts,
-                        tool_breakdown=dict(node.tool_breakdown),
+                        tool_breakdown=dict(inst.tool_breakdown),
                     )
                     vids.append(vid)
                 expansions[nid] = vids
