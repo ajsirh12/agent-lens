@@ -105,6 +105,8 @@ class FlowchartPanel(ScrollableContainer):
         self._graph = CallGraph()
         self._orientation: Orientation = orientation
         self._mode: Mode = mode
+        self._virtual_to_tid: dict[str, str] = {}
+        self._selected_tool_use_id: str | None = None
         self._layout: LayoutResult = self._compute_layout()
         self._canvas: Static | None = None
         self._updating = False
@@ -178,6 +180,9 @@ class FlowchartPanel(ScrollableContainer):
         children, skills) pass through unchanged.
         """
         sub = CallGraph()
+        # Clear per-rebuild so stale virtual ids from prior layouts
+        # don't leak into subsequent click lookups.
+        self._virtual_to_tid.clear()
         keep: set[str] = {ROOT_ID}
         for nid, node in self._graph.nodes.items():
             if nid == ROOT_ID:
@@ -216,6 +221,9 @@ class FlowchartPanel(ScrollableContainer):
                         tool_breakdown=dict(inst.tool_breakdown),
                     )
                     vids.append(vid)
+                    # Remember the FULL tool_use_id so action_drill_down
+                    # can look up the correct Instance on this node.
+                    self._virtual_to_tid[vid] = tid
                 expansions[nid] = vids
             else:
                 sub.nodes[nid] = node
@@ -425,6 +433,11 @@ class FlowchartPanel(ScrollableContainer):
                     # highlight and timeline matching work unchanged.
                     base = self._base_node_id(nid)
                     self.app.selected_agent_id = base  # type: ignore[attr-defined]
+                    # Remember which specific instance was clicked so
+                    # action_drill_down can open the right subagent file
+                    # even when multiple parallel instances share a base
+                    # node id. None for non-virtual hits.
+                    self._selected_tool_use_id = self._virtual_to_tid.get(nid)
                 except Exception:
                     pass
                 finally:

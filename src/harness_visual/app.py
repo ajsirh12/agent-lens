@@ -278,8 +278,26 @@ class HarnessVisualApp(App[int]):
         node = graph.nodes.get(nid)
         if node is None or node.node_type != "agent":
             return
+        # Prefer the specific instance the user clicked. Fall back to the
+        # node-level link if no virtual node was selected (single-spawn
+        # case or cross-highlight came from the timeline panel).
+        sub_uuid: str | None = None
+        instance_label_suffix = ""
+        tid = self._flowchart._selected_tool_use_id
+        if tid and tid in node._instances:
+            inst = node._instances[tid]
+            sub_uuid = inst.subagent_uuid
+            total = len(node._instances)
+            if total > 1:
+                try:
+                    idx = list(node._instances.keys()).index(tid) + 1
+                    instance_label_suffix = f" (instance {idx} of {total})"
+                except ValueError:
+                    pass
+        if sub_uuid is None:
+            sub_uuid = node.subagent_uuid
+
         events: list[dict[str, Any]] = []
-        sub_uuid = node.subagent_uuid
         if sub_uuid and self.active_session_path is not None:
             locator = SubagentLocator(main_session_path=self.active_session_path)
             target = None
@@ -290,7 +308,10 @@ class HarnessVisualApp(App[int]):
             if target is not None:
                 events = self._load_subagent_events(target)
         self.push_screen(
-            SubagentDetailScreen(node_label=node.label, events=events)
+            SubagentDetailScreen(
+                node_label=node.label + instance_label_suffix,
+                events=events,
+            )
         )
 
     def _load_subagent_events(self, path: Path) -> list[dict[str, Any]]:

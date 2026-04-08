@@ -519,3 +519,224 @@ async def test_virtual_node_tool_breakdown_copied_from_instance_object(
 
         # Confirm the ghost IS present on the node aggregate (sanity check).
         assert node.tool_breakdown.get("Ghost") == 99
+
+
+# ---------------------------------------------------------------------
+# Phase 2c: per-instance drill-down
+# ---------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_click_on_virtual_node_records_tool_use_id(
+    tmp_path: Path,
+) -> None:
+    app = HarnessVisualApp(
+        session_override=tmp_path / "empty.jsonl",
+        state_dir_override=tmp_path / "state-absent",
+    )
+    (tmp_path / "empty.jsonl").write_text("")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        fc = app._flowchart
+        assert fc is not None
+        fc.add_event(_agent_use("executor", tid="tid-aaaaaa"))
+        fc.add_event(_agent_use("executor", tid="tid-bbbbbb"))
+        fc.add_event(_result("tid-aaaaaa", linked="u1"))
+        fc.add_event(_result("tid-bbbbbb", linked="u2"))
+        if fc.get_mode() != "running":
+            fc.toggle_mode()
+        await pilot.pause()
+
+        virtual_ids = sorted(
+            nid for nid in fc._layout.nodes if nid.startswith("agent:executor#")
+        )
+        assert len(virtual_ids) == 2
+
+        # Click the second virtual node.
+        class _ClickEvent:
+            def __init__(self, x: int, y: int) -> None:
+                self.x = x
+                self.y = y
+
+        target_vid = virtual_ids[1]
+        pos = fc._layout.nodes[target_vid]
+        fc.on_click(_ClickEvent(x=pos.col + 1, y=pos.row + 1))
+        await pilot.pause()
+
+        # Selected tool_use_id is the FULL tid, not the truncated suffix.
+        expected_tid = fc._virtual_to_tid[target_vid]
+        assert fc._selected_tool_use_id == expected_tid
+        assert expected_tid in {"tid-aaaaaa", "tid-bbbbbb"}
+        # Cross-highlight still collapses to the base id.
+        assert app.selected_agent_id == "agent:executor"
+
+
+@pytest.mark.asyncio
+async def test_drill_down_uses_instance_subagent_uuid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_path = tmp_path / "main.jsonl"
+    session_path.write_text("")
+    # Create a subagents dir with two files, one per linked uuid.
+    subagents_dir = tmp_path / "main" / "subagents"
+    subagents_dir.mkdir(parents=True)
+    file_u1 = subagents_dir / "agent-aaaa1111.jsonl"
+    file_u2 = subagents_dir / "agent-bbbb2222.jsonl"
+    file_u1.write_text("")
+    file_u2.write_text("")
+
+    app = HarnessVisualApp(
+        session_override=session_path,
+        state_dir_override=tmp_path / "state-absent",
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        fc = app._flowchart
+        assert fc is not None
+        fc.add_event(_agent_use("executor", tid="tid-aaaaaa"))
+        fc.add_event(_agent_use("executor", tid="tid-bbbbbb"))
+        fc.add_event(_result("tid-aaaaaa", linked="aaaa1111"))
+        fc.add_event(_result("tid-bbbbbb", linked="bbbb2222"))
+        if fc.get_mode() != "running":
+            fc.toggle_mode()
+        await pilot.pause()
+
+        loaded_paths: list[Path] = []
+
+        def _fake_load(path: Path) -> list[dict]:
+            loaded_paths.append(path)
+            return []
+
+        pushed: list[object] = []
+
+        def _fake_push(screen: object, *args, **kwargs) -> None:
+            pushed.append(screen)
+
+        monkeypatch.setattr(app, "_load_subagent_events", _fake_load)
+        monkeypatch.setattr(app, "push_screen", _fake_push)
+
+        # Click the virtual node corresponding to the SECOND instance (t2 → bbbb2222).
+        target_vid = None
+        for vid, tid in fc._virtual_to_tid.items():
+            if tid == "tid-bbbbbb":
+                target_vid = vid
+                break
+        assert target_vid is not None
+
+        class _ClickEvent:
+            def __init__(self, x: int, y: int) -> None:
+                self.x = x
+                self.y = y
+
+        pos = fc._layout.nodes[target_vid]
+        fc.on_click(_ClickEvent(x=pos.col + 1, y=pos.row + 1))
+        await pilot.pause()
+
+        app.action_drill_down()
+        await pilot.pause()
+
+        # The drill-down loaded u2, not u1.
+        assert loaded_paths == [file_u2]
+        assert len(pushed) == 1
+        screen = pushed[0]
+        assert "instance 2 of 2" in getattr(screen, "node_label", "")
+
+
+@pytest.mark.asyncio
+async def test_drill_down_falls_back_to_node_when_no_virtual_selected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session_path = tmp_path / "main.jsonl"
+    session_path.write_text("")
+    subagents_dir = tmp_path / "main" / "subagents"
+    subagents_dir.mkdir(parents=True)
+    file_u1 = subagents_dir / "agent-aaaa1111.jsonl"
+    file_u2 = subagents_dir / "agent-bbbb2222.jsonl"
+    file_u1.write_text("")
+    file_u2.write_text("")
+
+    app = HarnessVisualApp(
+        session_override=session_path,
+        state_dir_override=tmp_path / "state-absent",
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        fc = app._flowchart
+        assert fc is not None
+        fc.add_event(_agent_use("executor", tid="tid-aaaaaa"))
+        fc.add_event(_agent_use("executor", tid="tid-bbbbbb"))
+        fc.add_event(_result("tid-aaaaaa", linked="aaaa1111"))
+        fc.add_event(_result("tid-bbbbbb", linked="bbbb2222"))
+        await pilot.pause()
+
+        # No virtual-node click: the timeline/cross-highlight path just
+        # sets selected_agent_id to the base id.
+        app.selected_agent_id = "agent:executor"
+        assert fc._selected_tool_use_id is None
+
+        loaded_paths: list[Path] = []
+
+        def _fake_load(path: Path) -> list[dict]:
+            loaded_paths.append(path)
+            return []
+
+        pushed: list[object] = []
+
+        def _fake_push(screen: object, *args, **kwargs) -> None:
+            pushed.append(screen)
+
+        monkeypatch.setattr(app, "_load_subagent_events", _fake_load)
+        monkeypatch.setattr(app, "push_screen", _fake_push)
+
+        app.action_drill_down()
+        await pilot.pause()
+
+        # Fallback uses node.subagent_uuid (last linked → u2 in this order).
+        node = fc._graph.nodes["agent:executor"]
+        expected_uuid = node.subagent_uuid
+        assert expected_uuid in {"aaaa1111", "bbbb2222"}
+        expected_file = subagents_dir / f"agent-{expected_uuid}.jsonl"
+        assert loaded_paths == [expected_file]
+        # Label has no "instance N of M" suffix on the fallback path.
+        assert len(pushed) == 1
+        assert "instance" not in getattr(pushed[0], "node_label", "")
+
+
+@pytest.mark.asyncio
+async def test_running_subgraph_clears_virtual_tid_map_each_rebuild(
+    tmp_path: Path,
+) -> None:
+    app = HarnessVisualApp(
+        session_override=tmp_path / "empty.jsonl",
+        state_dir_override=tmp_path / "state-absent",
+    )
+    (tmp_path / "empty.jsonl").write_text("")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        fc = app._flowchart
+        assert fc is not None
+
+        # Turn 1: 2 parallel instances.
+        fc.add_event(_agent_use("executor", tid="tid-aaaaaa"))
+        fc.add_event(_agent_use("executor", tid="tid-bbbbbb"))
+        await pilot.pause()
+
+        fc._running_subgraph()
+        assert len(fc._virtual_to_tid) == 2
+        turn1_tids = set(fc._virtual_to_tid.values())
+        assert turn1_tids == {"tid-aaaaaa", "tid-bbbbbb"}
+
+        # Flush turn.
+        fc.add_event(_user_msg("next turn"))
+
+        # Turn 2: 2 new instances.
+        fc.add_event(_agent_use("executor", tid="tid-cccccc"))
+        fc.add_event(_agent_use("executor", tid="tid-dddddd"))
+        await pilot.pause()
+
+        fc._running_subgraph()
+        assert len(fc._virtual_to_tid) == 2
+        turn2_tids = set(fc._virtual_to_tid.values())
+        assert turn2_tids == {"tid-cccccc", "tid-dddddd"}
+        # Stale entries from turn 1 are gone.
+        assert turn1_tids.isdisjoint(turn2_tids)
