@@ -25,9 +25,15 @@ class SessionPickerScreen(ModalScreen[Path | None]):
         Binding("enter", "select", "Select"),
     ]
 
-    def __init__(self, candidates: list[Path]) -> None:
+    def __init__(
+        self,
+        candidates: list[Path],
+        *,
+        current_path: Path | None = None,
+    ) -> None:
         super().__init__()
         self.candidates = candidates
+        self.current_path = current_path
 
     def compose(self) -> ComposeResult:
         with Vertical(id="picker-body"):
@@ -45,15 +51,27 @@ class SessionPickerScreen(ModalScreen[Path | None]):
                 classes="placeholder",
             )
 
-    @staticmethod
-    def _format_row(path: Path) -> str:
+    def _format_row(self, path: Path | None = None) -> str:
+        # Back-compat: the original implementation was a staticmethod, so
+        # some callers invoke it as ``SessionPickerScreen._format_row(p)``
+        # which binds ``path`` to ``self``. Detect that by checking whether
+        # the first argument looks like a Path.
+        if isinstance(self, Path):
+            path = self  # type: ignore[assignment]
+            current: Path | None = None
+        else:
+            current = self.current_path
+        assert path is not None
         try:
             st = path.stat()
             mtime = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
             size_kb = st.st_size / 1024
-            return f"{mtime}  {size_kb:8.1f} KB  {path.name}"
+            row = f"{mtime}  {size_kb:8.1f} KB  {path.name}"
         except OSError:
-            return path.name
+            row = path.name
+        if current is not None and path == current:
+            row = f"{row} ✓ (current)"
+        return row
 
     def on_mount(self) -> None:
         lv = self.query_one("#picker-list", ListView)

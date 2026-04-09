@@ -227,6 +227,24 @@ class TimelinePanel(Container):
         except Exception:
             return None
 
+    def clear(self) -> None:
+        """Reset the timeline to an empty state. Safe to call pre-mount."""
+        self._pending_use = {}
+        self._tool_use_row = {}
+        self._row_input = {}
+        self._row_agent = {}
+        self._row_message = {}
+        self._updating = False
+        self._row_count = 0
+        if self._table is None:
+            return
+        try:
+            self._table.clear()
+        except Exception:
+            pass
+        if self._placeholder is not None:
+            self._placeholder.display = True
+
     def get_selected_input_summary(self) -> str:
         """Return the stored input preview for the currently-selected row, or ''."""
         if self._table is None:

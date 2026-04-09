@@ -11,6 +11,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container
 from textual.reactive import reactive
 from textual.widgets import Static
+from textual.worker import Worker
 
 from .locator import SessionLocator
 from .messages import HarnessEventMessage
@@ -47,6 +48,7 @@ class AgentlensApp(App[int]):
         ("pagedown", "flowchart_scroll_down", "Flow ↓"),
         ("home", "flowchart_scroll_home", "Flow ⇱"),
         ("end", "flowchart_scroll_end", "Flow ⇲"),
+        ("s", "switch_session", "Switch session"),
     ]
 
     selected_agent_id: reactive[str | None] = reactive(None)
@@ -78,6 +80,8 @@ class AgentlensApp(App[int]):
         self._watcher: SessionWatcher | None = None
         self._omc_reader: OmcStateReader | None = None
         self._subagent_manager: SubagentWatcherManager | None = None
+        self._watcher_worker: Worker | None = None
+        self._subagent_worker: Worker | None = None
 
     def compose(self) -> ComposeResult:
         with Container(id="main"):
@@ -134,22 +138,8 @@ class AgentlensApp(App[int]):
             self.set_timer(0.1, self.exit)
             return
 
-        if self.active_session_path is not None and self._watcher is None:
-            self._watcher = make_tailer(self.active_session_path)
-            self.run_worker(
-                self._watcher.run(app=self, bus=None),
-                exclusive=False,
-                name="watcher",
-            )
-            if not self.no_attach and self._subagent_manager is None:
-                self._subagent_manager = SubagentWatcherManager(
-                    main_session_path=self.active_session_path
-                )
-                self.run_worker(
-                    self._subagent_manager.run(app=self),
-                    exclusive=False,
-                    name="subagent_manager",
-                )
+        if self.active_session_path is not None:
+            self._start_session_workers(self.active_session_path)
 
         if self._omc_reader is None:
             self._omc_reader = OmcStateReader(self.state_dir)
@@ -160,6 +150,47 @@ class AgentlensApp(App[int]):
             )
 
             self.set_interval(1.0, self._refresh_idle_footer)
+
+    def _start_session_workers(self, path: Path) -> None:
+        """Spawn the main watcher + subagent manager for ``path``.
+
+        Idempotent when existing handles are present (won't double-spawn).
+        """
+        if self._watcher is None:
+            self._watcher = make_tailer(path)
+            self._watcher_worker = self.run_worker(
+                self._watcher.run(app=self, bus=None),
+                exclusive=False,
+                name="watcher",
+            )
+        if not self.no_attach and self._subagent_manager is None:
+            self._subagent_manager = SubagentWatcherManager(
+                main_session_path=path
+            )
+            self._subagent_worker = self.run_worker(
+                self._subagent_manager.run(app=self),
+                exclusive=False,
+                name="subagent_manager",
+            )
+
+    def _stop_session_workers(self) -> None:
+        """Cancel in-flight watcher + subagent workers so a fresh pair
+        can be started for a different session path.
+        """
+        if self._watcher_worker is not None:
+            try:
+                self._watcher_worker.cancel()
+            except Exception:
+                pass
+            self._watcher_worker = None
+        if self._subagent_worker is not None:
+            try:
+                self._subagent_worker.cancel()
+            except Exception:
+                pass
+            self._subagent_worker = None
+        self._watcher = None
+        self._subagent_manager = None
 
     def _flowchart_counts_suffix(self) -> str:
         if self._flowchart is None:
@@ -377,6 +408,42 @@ class AgentlensApp(App[int]):
             except Exception:
                 pass
             self._update_footer()
+
+    def action_switch_session(self) -> None:
+        """Open the picker on the same slug dir and, on selection, swap
+        the active session without restarting the app.
+        """
+        locator = SessionLocator(
+            cwd=self.project_root or Path.cwd(),
+            projects_root=Path.home() / ".claude" / "projects",
+        )
+        candidates = locator.find_candidates()
+        if not candidates:
+            return
+
+        def _on_picked(chosen: Path | None) -> None:
+            if chosen is None:
+                return
+            if chosen == self.active_session_path:
+                return
+            self._stop_session_workers()
+            self.active_session_path = chosen
+            self.locator_reason = "switched"
+            if self._timeline is not None:
+                self._timeline.clear()
+            if self._flowchart is not None:
+                self._flowchart.clear()
+            self.last_event_monotonic = 0.0
+            self.selected_agent_id = None
+            self._start_session_workers(chosen)
+            self._update_footer()
+
+        self.push_screen(
+            SessionPickerScreen(
+                candidates, current_path=self.active_session_path
+            ),
+            _on_picked,
+        )
 
     def action_toggle_pane_layout(self) -> None:
         """Swap the Timeline/Flowchart arrangement between side-by-side

@@ -132,6 +132,14 @@ class FlowchartPanel(ScrollableContainer):
             self._refresh_canvas()
 
     # ------------------------------------------------------------------
+    def clear(self) -> None:
+        """Reset the graph + layout to a fresh root-only state."""
+        self._graph = CallGraph()
+        self._virtual_to_tid = {}
+        self._selected_tool_use_id = None
+        self._layout = self._compute_layout()
+        self._refresh_canvas()
+
     def get_node_count(self) -> int:
         return len(self._graph.nodes)
 
