@@ -306,11 +306,21 @@ class FlowchartPanel(ScrollableContainer):
         except Exception:
             selected = None
         selected_base = self._base_node_id(selected)
+        selected_tid = self._selected_tool_use_id
         for nid, pos in layout.nodes.items():
             node_base = self._base_node_id(nid)
-            self._draw_box(
-                grid, pos, highlight=(node_base == selected_base and selected_base is not None)
-            )
+            base_match = node_base == selected_base and selected_base is not None
+            # When the user clicked a virtual instance box, highlight
+            # ONLY that exact instance — otherwise two parallel spawns
+            # of the same type both light up and the user can't tell
+            # which one they clicked. Selection coming from the
+            # timeline (no tid recorded) still falls back to base-id
+            # matching so every relevant instance lights up.
+            if selected_tid is not None and "#" in nid:
+                highlight = self._virtual_to_tid.get(nid) == selected_tid
+            else:
+                highlight = base_match
+            self._draw_box(grid, pos, highlight=highlight)
 
         # Convert grid to a single Text.
         text = Text()

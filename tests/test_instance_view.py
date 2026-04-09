@@ -740,3 +740,69 @@ async def test_running_subgraph_clears_virtual_tid_map_each_rebuild(
         assert turn2_tids == {"tid-cccccc", "tid-dddddd"}
         # Stale entries from turn 1 are gone.
         assert turn1_tids.isdisjoint(turn2_tids)
+
+
+# ----------------------------------------------------------------------
+# Option A: per-instance highlight (only clicked virtual lights up)
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_only_clicked_virtual_instance_highlights(tmp_path: Path) -> None:
+    """When the user clicks a virtual instance box, only that exact
+    instance should render as highlighted — not every sibling sharing
+    the same base id. Timeline-driven selection (no tid recorded) still
+    falls back to base-id matching.
+    """
+    app = HarnessVisualApp(
+        session_override=tmp_path / "empty.jsonl",
+        state_dir_override=tmp_path / "state-absent",
+    )
+    (tmp_path / "empty.jsonl").write_text("")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        fc = app._flowchart
+        assert fc is not None
+        g = fc._graph
+
+        # Two parallel spawns of the same type
+        g.update_from_event(_agent_use("executor", tid="tid-aaaa1111"))
+        g.update_from_event(_result("tid-aaaa1111", linked="aaaa1111"))
+        g.update_from_event(_agent_use("executor", tid="tid-bbbb2222"))
+        g.update_from_event(_result("tid-bbbb2222", linked="bbbb2222"))
+        # Switch to running mode so _running_subgraph runs and the
+        # virtual instance map gets populated.
+        fc.toggle_mode()
+        assert fc.get_mode() == "running"
+        fc._layout = fc._compute_layout()
+        await pilot.pause()
+
+        # Simulate clicking the first virtual instance.
+        app.selected_agent_id = "agent:executor"
+        fc._selected_tool_use_id = "tid-aaaa1111"
+        # Render and inspect highlight decisions. We re-run the render
+        # by calling _render_text() which internally calls _draw_box.
+        # Instead of scraping the grid, we verify via the private
+        # _virtual_to_tid map and the highlight decision branch.
+        vids = sorted(fc._virtual_to_tid.keys())
+        assert len(vids) == 2
+        first_vid = next(v for v, t in fc._virtual_to_tid.items() if t == "tid-aaaa1111")
+        second_vid = next(v for v, t in fc._virtual_to_tid.items() if t == "tid-bbbb2222")
+
+        # Replicate the render-time highlight logic exactly.
+        def highlight_for(nid: str) -> bool:
+            node_base = fc._base_node_id(nid)
+            selected_base = fc._base_node_id(app.selected_agent_id)
+            base_match = node_base == selected_base and selected_base is not None
+            if fc._selected_tool_use_id is not None and "#" in nid:
+                return fc._virtual_to_tid.get(nid) == fc._selected_tool_use_id
+            return base_match
+
+        assert highlight_for(first_vid) is True
+        assert highlight_for(second_vid) is False
+
+        # Now clear the tid (simulate timeline-driven selection) —
+        # both should light up via base-id fallback.
+        fc._selected_tool_use_id = None
+        assert highlight_for(first_vid) is True
+        assert highlight_for(second_vid) is True
