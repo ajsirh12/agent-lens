@@ -7,7 +7,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-ChosenReason = Literal["slug", "fallback", "cwd-match", "none", "override", "picker"]
+ChosenReason = Literal[
+    "slug",
+    "fallback",
+    "cwd-match",
+    "none",
+    "override",
+    "picker",
+    "switched",
+    "path-input",
+]
 
 
 def _norm(p: str) -> str:

@@ -18,6 +18,7 @@ from .messages import HarnessEventMessage
 from .omc_state import OmcStateReader
 from .panels.detail_modal import ToolDetailScreen
 from .panels.flowchart import FlowchartPanel
+from .panels.session_path_input import SessionPathInputScreen
 from .panels.session_picker import SessionPickerScreen
 from .panels.subagent_detail import SubagentDetailScreen
 from .panels.timeline import TimelinePanel
@@ -49,6 +50,7 @@ class AgentlensApp(App[int]):
         ("home", "flowchart_scroll_home", "Flow ⇱"),
         ("end", "flowchart_scroll_end", "Flow ⇲"),
         ("s", "switch_session", "Switch session"),
+        ("shift+s", "open_session_path", "Open session by path"),
     ]
 
     selected_agent_id: reactive[str | None] = reactive(None)
@@ -444,6 +446,32 @@ class AgentlensApp(App[int]):
             ),
             _on_picked,
         )
+
+    def action_open_session_path(self) -> None:
+        """Open a modal where the user pastes a JSONL path and, on
+        submit, swap the active session without restarting the app.
+        Provides an escape hatch when the normal slug-based picker
+        cannot find the intended session (e.g. Windows path mismatch).
+        """
+
+        def _on_picked(chosen: Path | None) -> None:
+            if chosen is None:
+                return
+            if chosen == self.active_session_path:
+                return
+            self._stop_session_workers()
+            self.active_session_path = chosen
+            self.locator_reason = "path-input"
+            if self._timeline is not None:
+                self._timeline.clear()
+            if self._flowchart is not None:
+                self._flowchart.clear()
+            self.last_event_monotonic = 0.0
+            self.selected_agent_id = None
+            self._start_session_workers(chosen)
+            self._update_footer()
+
+        self.push_screen(SessionPathInputScreen(), _on_picked)
 
     def action_toggle_pane_layout(self) -> None:
         """Swap the Timeline/Flowchart arrangement between side-by-side

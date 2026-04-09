@@ -76,3 +76,30 @@ SessionPickerScreen {
     height: auto;
     max-height: 20;
 }
+
+SessionPathInputScreen {
+    align: center middle;
+}
+
+#path-input-body {
+    width: 90;
+    max-width: 95%;
+    height: auto;
+    border: thick $accent;
+    background: $panel;
+    padding: 1 2;
+}
+
+#path-input-title {
+    padding-bottom: 1;
+}
+
+#session-path-field {
+    margin-bottom: 1;
+}
+
+#path-input-error {
+    height: auto;
+    min-height: 1;
+    padding: 0;
+}
