@@ -80,6 +80,82 @@ def test_validate_rejects_non_jsonl_suffix(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
+# Session ID / prefix resolution
+# ---------------------------------------------------------------------
+
+
+def _make_projects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Create a fake ~/.claude/projects under tmp_path and patch home."""
+    projects = tmp_path / ".claude" / "projects"
+    projects.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    return projects
+
+
+def test_validate_resolves_full_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects = _make_projects(tmp_path, monkeypatch)
+    d = projects / "-some-project"
+    d.mkdir()
+    target = d / "b0709256-eb61-4ccb-9b57-49aaca263c33.jsonl"
+    target.write_text("{}\n")
+    screen = _make_screen()
+    assert (
+        screen._validate("b0709256-eb61-4ccb-9b57-49aaca263c33") == target
+    )
+
+
+def test_validate_resolves_unique_session_id_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects = _make_projects(tmp_path, monkeypatch)
+    d = projects / "-some-project"
+    d.mkdir()
+    target = d / "b0709256-eb61-4ccb-9b57-49aaca263c33.jsonl"
+    target.write_text("{}\n")
+    # Also add a clearly different one so the prefix is still unique.
+    other = d / "aaaaaaaa-eeee-4ccb-9b57-49aaca263c33.jsonl"
+    other.write_text("{}\n")
+    screen = _make_screen()
+    assert screen._validate("b0709256") == target
+
+
+def test_validate_rejects_ambiguous_session_id_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects = _make_projects(tmp_path, monkeypatch)
+    d = projects / "-some-project"
+    d.mkdir()
+    (d / "b0709256-eb61-4ccb-9b57-49aaca263c33.jsonl").write_text("{}\n")
+    (d / "b0709256-aaaa-bbbb-cccc-dddddddddddd.jsonl").write_text("{}\n")
+    screen = _make_screen()
+    assert screen._validate("b0709256") is None
+
+
+def test_validate_rejects_unknown_session_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _make_projects(tmp_path, monkeypatch)
+    screen = _make_screen()
+    assert screen._validate("ffffffff-no-such-session") is None
+
+
+def test_validate_resolves_across_multiple_project_dirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lookup walks every project subdir, not just the current slug."""
+    projects = _make_projects(tmp_path, monkeypatch)
+    (projects / "-dir-a").mkdir()
+    (projects / "-dir-b").mkdir()
+    (projects / "-dir-a" / "noise.jsonl").write_text("{}\n")
+    target = projects / "-dir-b" / "cafebabe-1234.jsonl"
+    target.write_text("{}\n")
+    screen = _make_screen()
+    assert screen._validate("cafebabe") == target
+
+
+# ---------------------------------------------------------------------
 # App integration
 # ---------------------------------------------------------------------
 
