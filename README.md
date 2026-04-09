@@ -1,18 +1,72 @@
 # harness-visual
 
-Live-tail TUI for Claude Code sessions + OMC team state.
+Live-tail TUI for Claude Code sessions. Shows a Timeline of tool calls
+alongside a real-time Flowchart of agent and skill spawns, including
+nested subagent trees and parallel-instance views.
 
-Two synchronized panels on one screen:
+```
+┌──────────────────────────────────────┬──────────────────────────────────────┐
+│ Timeline                             │ Flowchart                            │
+│ ───────────────────────────────────  │ ──────────────────────────────────   │
+│ ts        tool      agent  status    │        ┌──────┐                      │
+│ 14:02:01  Task      main   ✓  1205   │        │ main │                      │
+│ 14:02:03  Task      main   ✓  4708   │        └───┬──┘                      │
+│ 14:02:10  Read      exec   ✓    12   │            │                         │
+│ 14:02:11  Edit      exec   ✓    45   │   ┌────────┼──────────┐              │
+│ ...                                  │   ▼        ▼          ▼              │
+│                                      │ ┌─────┐ ┌──────┐  ┌────────┐         │
+│                                      │ │plan │ │ exec │  │ critic │         │
+│                                      │ │(x3) │ │[Rd4] │  │        │         │
+│                                      │ │Rd12 │ └──────┘  └────────┘         │
+│                                      │ └─────┘                              │
+├──────────────────────────────────────┴──────────────────────────────────────┤
+│ session: b0709256-...jsonl [slug]  nodes: 5 edges: 4  [all/LR/H]           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-- **Timeline** (`DataTable`): tool_use / tool_result events from the attached
-  JSONL session.
-- **Agent Tree** (`Tree`): sub-agents from `.omc/state/subagent-tracking.json`
-  and `mission-state.json`.
+## Features
 
-Both panels cross-highlight bidirectionally through a single reactive
-`selected_agent_id` on the app.
+- **Live tail** of the main Claude Code session JSONL via `watchfiles`
+  (with stdlib polling fallback) — new events appear within ~1 second.
+- **Timeline panel**: scrollable DataTable of every tool_use /
+  tool_result event in the session, with cross-highlight to the
+  flowchart.
+- **Flowchart panel**: live directed graph of Agent/Task/Skill calls,
+  with parent/child edges, (xN) duplicate counters, per-subagent
+  tool breakdown badges (e.g. `Rd12 Ed5`), and color-coded status
+  (running / done / error).
+- **True nested subagent tree** up to depth 5: if a subagent spawns
+  another subagent via Skill, the nested spawn shows up as a child
+  node in the flowchart instead of collapsing onto `main`.
+- **Mode-dependent instance view**: in `[running]` mode, parallel
+  spawns of the same agent type render as distinct boxes with
+  per-instance tool counts; in `[all]` mode they aggregate into a
+  single box with a `(xN)` counter and summed breakdown.
+- **Sticky running**: a node stays visually green until the next real
+  user prompt, so fast agents don't flicker into "done" before you
+  notice them. Background task notifications, hook reminders, and
+  subagents' own user rows are filtered out of the flush logic.
+- **Per-instance drill-down** (`d` key): open a modal listing the
+  specific tool history of the clicked parallel instance — each
+  instance opens its own subagent JSONL file.
+- **Three orthogonal toggles**:
+  - `m` — mode (all ↔ running only)
+  - `o` — orientation (top-down ↔ left-right)
+  - `p` — panes (horizontal ↔ vertical)
+- **Scrollable flowchart** with mouse wheel + keyboard (PgUp/PgDn,
+  Shift+H/L, Home/End).
+- **Session picker** when multiple JSONLs exist in the same slug
+  directory. `--latest` bypasses it.
+- **Subagent watcher** automatically discovers and tails new
+  `agent-*.jsonl` files as they're created under the session's
+  `subagents/` directory.
+- **Defensive**: schema-tolerant parser (never raises on unknown
+  fields), MAX_NODES / MAX_BUFFER_BYTES / MAX_RAW_LINE caps against
+  adversarial input, ANSI escape sanitization for terminal safety.
 
 ## Install
+
+Requires Python 3.11+.
 
 ```bash
 python3 -m venv .venv
@@ -20,80 +74,38 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
-If `watchfiles` cannot be installed (offline, exotic platform), the TUI
-auto-falls back to a stdlib polling tailer. You can also force it:
+## Run
+
+```bash
+harness-visual                       # auto-pick newest session in cwd's slug dir
+harness-visual --latest              # skip picker, take newest
+harness-visual --session PATH        # attach a specific JSONL
+harness-visual --project-root PATH   # compute slug from a different cwd
+harness-visual --self-test           # render one frame, exit 0 (CI smoke)
+harness-visual -v                    # verbose logging
+```
+
+If `watchfiles` can't be installed, set `HARNESS_VISUAL_BACKEND=polling`
+to force the stdlib polling tailer:
 
 ```bash
 HARNESS_VISUAL_BACKEND=polling harness-visual
 ```
 
-## Run
-
-```bash
-harness-visual                       # auto-pick newest session under ~/.claude/projects/
-harness-visual --session PATH        # attach to a specific JSONL
-harness-visual --project-root PATH   # use PATH to compute the session slug
-harness-visual --self-test           # render once, then exit 0 (CI smoke)
-```
-
-`q` quits, `j/k` or arrows move the Timeline cursor, `Enter` opens the tool
-detail modal.
+See [`docs/USAGE.md`](docs/USAGE.md) for the full usage guide,
+including key bindings, mode semantics, drill-down flow, and
+architecture notes.
 
 ## Tests
 
 ```bash
-pytest -q
+pytest -q           # 123 tests
 ```
 
-## Acceptance criteria — verification map
+## Status
 
-| AC   | Test / procedure                                                           |
-|------|----------------------------------------------------------------------------|
-| AC1  | `tests/test_smoke.py::test_launches_and_renders_empty`                     |
-| AC2  | `tests/test_locator.py` (primary + fallback)                               |
-| AC3  | `tests/test_smoke.py` mounts both panels                                   |
-| AC4  | `tests/test_smoke.py::test_live_tail_latency_under_one_second`             |
-| AC5  | `tests/test_omc_state.py::test_subagent_tracking_diff_emits_spawn`         |
-| AC6  | `tests/test_cross_highlight.py` (forward + reverse)                        |
-| AC7  | `tests/test_smoke.py::test_enter_opens_detail_modal`                       |
-| AC8  | `tests/test_responsiveness.py::test_keypress_repaint_under_200ms` + M-AC8  |
-| AC9  | `tests/test_smoke.py::test_launches_and_renders_empty`                     |
-| AC10 | `tests/test_parser.py` + `tests/test_replay_real_slice.py`                 |
-| AC11 | Manual procedure **M-AC11** below                                          |
+v0.2.0 — feature-complete for single-user observation of Claude Code
+sessions, including the live-tail Flowchart, nested trees, instance
+view, drill-down, and the full set of rendering toggles.
 
-## Manual Verification
-
-### M-AC8-idle
-
-1. `harness-visual` attached to a JSONL.
-2. Stop appending; wait 35 s.
-3. Expected: footer reads `session idle`. `j` / `k` still responsive.
-4. Record timestamp + pass/fail here.
-
-_Recorded: [pending]_
-
-### M-AC11 (idle CPU ≤ 2%)
-
-1. `harness-visual` + `top -pid $(pgrep -f harness_visual) -stats cpu`.
-2. Observe ≤ 2% over 30 s against an idle JSONL.
-3. Record timestamp + pass/fail here.
-
-_Recorded: [pending]_
-
-### M-live (live Claude Code session)
-
-1. Terminal A: `harness-visual`.
-2. Terminal B: `python scripts/fake_session.py --count 200 --rate 10 --target /tmp/fake.jsonl`.
-3. Confirm Timeline fills and AgentTree grows. Then `--rotate-at 50`; confirm
-   watcher recovers.
-
-_Recorded: [pending]_
-
-## Architecture
-
-`SessionWatcher` (watchfiles or polling) → `app.post_message()` → panels.
-`bus.py` (≤30 LOC) is a test-only seam: an `asyncio.Queue` the watcher also
-publishes to so headless tests can drain events without mounting the UI.
-
-See `docs/jsonl-schema-observed.md` for the observed Claude Code JSONL shape
-driving `parser.py`.
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
