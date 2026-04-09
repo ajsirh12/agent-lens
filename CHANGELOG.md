@@ -8,10 +8,26 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
-## [Unreleased]
+## [0.4.0] - 2026-04-09
+
+Windows / git-bash compatibility and UX escape hatches. Adds a
+paste-a-path modal, session-id / prefix lookup, a cwd-field
+fallback in the locator, and a tail -f style auto-follow on the
+Timeline panel. 157 tests passing.
 
 ### Added
 
+- **Timeline auto-follows the bottom row on new events.** When
+  the DataTable cursor is on the last row (or the table is
+  empty), incoming events pull the cursor — and therefore the
+  viewport — to the new last row. Classic `tail -f` behavior.
+  When the user has scrolled up to inspect an older event the
+  cursor is no longer at the bottom, so the detection returns
+  False and incoming events leave the viewport alone. Scrolling
+  back to the last row resumes auto-follow. Bulk ingestion
+  (tests, startup catch-up, bursty subagent output) is coalesced
+  via `call_after_refresh` + a `_scroll_pending` guard so N
+  add_events in one frame result in a single cursor move, not N.
 - **Paste-a-path modal via `Shift+S`** (`panels/session_path_input.py`).
   Pushes a modal with a single Input field. Paste a JSONL path (or a
   bare session id / prefix), press Enter, and the app swaps the

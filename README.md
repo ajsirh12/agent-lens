@@ -151,9 +151,12 @@ polling loop or set_interval rate is ever changed.
 
 ## Status
 
-v0.3.0 — renamed from harness-visual → agentlens, with mid-session
-switch via `s`, and the v0.2.0 feature set (live-tail Flowchart,
-nested trees, instance view, drill-down, rendering toggles)
-preserved. 133 tests passing.
+v0.4.0 — Windows / git-bash compatibility and UX escape hatches.
+Adds a paste-a-path modal (`Shift+S`, accepts full paths or bare
+session id / prefix), a cwd-field fallback in the session locator,
+and a `tail -f`-style auto-follow on the Timeline panel. Everything
+from v0.3.0 (rename, mid-session switch, DoD closeout) and v0.2.0
+(live-tail Flowchart, nested trees, instance view, drill-down,
+rendering toggles) is preserved. 157 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
