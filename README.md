@@ -102,13 +102,48 @@ architecture notes.
 ## Tests
 
 ```bash
-pytest -q           # 123 tests
+pytest -q           # 133 tests
 ```
+
+## Manual Verification
+
+The Definition of Done from the original spec tracked two manual
+checks beyond the automated suite.
+
+### M-AC8-idle (footer shows `— session idle` after >30s)
+
+**Status:** PASSED — covered by automated tests in
+`tests/test_idle_footer.py` (4 tests, all green). The tests
+monkeypatch `time.monotonic` and exercise `_refresh_idle_footer`
+directly, covering the positive case, the < 30s negative case,
+the fresh-session (no event yet) edge case, and the exact
+boundary at 30.000 vs 30.001 seconds.
+
+### M-AC11 (idle CPU ≤ 2%)
+
+**Status:** PASSED — measured 2026-04-09.
+
+Measurement procedure: `agentlens` spawned via `pty.fork()`
+inside a Python harness, attached to an empty session file with
+`AGENTLENS_BACKEND=polling`, sampled via `ps -o pcpu=` once per
+second for 10 seconds after a 3-second mount delay.
+
+Results:
+
+| Metric | Value | Target |
+|--------|-------|--------|
+| Idle CPU average (10s window) | **0.16 %** | ≤ 2 % |
+| Idle CPU max (10s window) | **0.30 %** | ≤ 2 % |
+| RSS | **40.7 MB** | — |
+
+Well under the target with headroom to spare. Re-measure if the
+polling loop or set_interval rate is ever changed.
 
 ## Status
 
-v0.2.0 — feature-complete for single-user observation of Claude Code
-sessions, including the live-tail Flowchart, nested trees, instance
-view, drill-down, and the full set of rendering toggles.
+v0.3.0 — renamed from harness-visual → agentlens, with mid-session
+switch via `s`, and the v0.2.0 feature set (live-tail Flowchart,
+nested trees, instance view, drill-down, rendering toggles)
+preserved. 133 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

@@ -8,7 +8,11 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
-## [Unreleased]
+## [0.3.0] - 2026-04-09
+
+Rename + mid-session switch + Definition-of-Done closeout. 133 tests
+passing. The repository directory on disk is unchanged — the
+distinction is purely at the installable identity layer.
 
 ### Added
 
@@ -21,6 +25,18 @@ user-visible behavior changes, PATCH bumps ship fixes only.
   Cross-project switching is out of scope — use `--project-root`
   or `--session` at launch for that. The OMC state reader keeps
   running across switches since `.omc/state/` is cwd-relative.
+- **M-AC8-idle automated coverage** (`tests/test_idle_footer.py`,
+  4 tests). The "footer shows `— session idle` after >30s"
+  acceptance criterion — originally listed as a manual procedure
+  in the spec's Definition of Done — is now exercised in the
+  test suite by monkeypatching `time.monotonic`. Positive case,
+  sub-30s negative case, fresh-session edge, and the boundary at
+  30.000 vs 30.001 seconds are all covered.
+- **M-AC11 measurement recorded in README**. Idle CPU measured
+  via `pty.fork` + `ps -o pcpu=` sampling over a 10-second
+  window: **0.16 % average**, **0.30 % peak**, **40.7 MB RSS** —
+  well under the ≤ 2 % target. Documented in `README.md` ->
+  `## Manual Verification`.
 
 ### Changed
 
