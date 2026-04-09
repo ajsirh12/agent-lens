@@ -10,12 +10,28 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Mid-session switch** via the new `s` key. Opens the session
+  picker in-place, marks the currently-attached file with
+  `✓ (current)`, and on a different pick stops the running
+  watcher + subagent manager, clears Timeline and Flowchart
+  state, and catches up the new JSONL from its first line.
+  Picking the current file or cancelling with Esc is a no-op.
+  Cross-project switching is out of scope — use `--project-root`
+  or `--session` at launch for that. The OMC state reader keeps
+  running across switches since `.omc/state/` is cwd-relative.
+
 ### Changed
 
 - Renamed Python package, CLI entry point, and environment
   variable from harness-visual / HARNESS_VISUAL_BACKEND to
   agentlens / AGENTLENS_BACKEND. The repository directory on
   disk is unchanged — only the installable package name moved.
+- Renamed `HarnessVisualApp` → `AgentlensApp`. Domain vocabulary
+  classes (`HarnessEvent`, `HarnessEventMessage`) kept — they
+  describe "events from a session harness" and are independent
+  of the installable identity.
 
 ---
 

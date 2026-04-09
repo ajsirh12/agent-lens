@@ -55,8 +55,11 @@ nested subagent trees and parallel-instance views.
   - `p` — panes (horizontal ↔ vertical)
 - **Scrollable flowchart** with mouse wheel + keyboard (PgUp/PgDn,
   Shift+H/L, Home/End).
-- **Session picker** when multiple JSONLs exist in the same slug
-  directory. `--latest` bypasses it.
+- **Session picker** at launch when multiple JSONLs exist in the
+  same slug directory. `--latest` bypasses it. Press `s` during
+  runtime to switch to a different session in the same directory
+  without restarting — Timeline and Flowchart rebuild for the new
+  session automatically.
 - **Subagent watcher** automatically discovers and tails new
   `agent-*.jsonl` files as they're created under the session's
   `subagents/` directory.

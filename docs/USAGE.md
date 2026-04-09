@@ -91,6 +91,7 @@ agentlens
 | `k` / `↑` | Timeline 커서 위로 |
 | `Enter` | 선택된 timeline row 의 상세 모달 (tool name / input / status / duration) |
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
+| `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
 
 ### Flowchart 모드 토글
 
@@ -113,6 +114,21 @@ agentlens
 ---
 
 ## 5. 주요 개념
+
+### 세션 전환 (`s` 키)
+
+실행 중 `s` 키를 누르면 **같은 slug 디렉토리의 다른 JSONL** 로 재시작 없이 바로 전환할 수 있습니다.
+
+- Picker 모달에 현재 slug 디렉토리의 모든 JSONL 파일 목록 (mtime desc)
+- 현재 attach 된 세션은 row 끝에 `✓ (current)` 마커
+- 다른 파일 선택 → 기존 watcher/subagent manager 정지 → Timeline + Flowchart 클리어 → 새 파일의 첫 줄부터 catch-up → live tail 시작
+- 현재 파일 선택 → no-op
+- `Esc` → 취소, 상태 변화 없음
+- 후보가 0개면 picker 안 뜸
+
+전환 후 footer 의 `locator_reason` 이 `[switched]` 로 표시되어 전환된 세션임을 구분할 수 있습니다.
+
+**주의**: `s` 는 현재 slug 디렉토리 내부의 세션만 보여줍니다. 다른 프로젝트의 세션을 보려면 `q` 로 종료 후 `--project-root` 나 `--session` 으로 재시작해야 합니다.
 
 ### Sticky Running
 Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트가 올 때까지** 노드는 초록(running) 으로 유지됩니다. 빠른 agent 가 바로 회색으로 바뀌어 놓치는 것을 방지합니다.
