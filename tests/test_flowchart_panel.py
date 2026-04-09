@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
-from harness_visual.events import EventType, HarnessEvent
+from agentlens.app import AgentlensApp
+from agentlens.events import EventType, HarnessEvent
 
 
 def _task(subagent: str, tid: str = "t1") -> HarnessEvent:
@@ -26,7 +26,7 @@ def _task(subagent: str, tid: str = "t1") -> HarnessEvent:
 
 @pytest.mark.asyncio
 async def test_flowchart_mounts_with_root_only(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -42,7 +42,7 @@ async def test_flowchart_mounts_with_root_only(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_flowchart_task_event_increases_node_count(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -60,7 +60,7 @@ async def test_flowchart_task_event_increases_node_count(tmp_path: Path) -> None
 
 @pytest.mark.asyncio
 async def test_flowchart_cross_highlight_no_error(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -97,7 +97,7 @@ def _user_message() -> HarnessEvent:
 
 @pytest.mark.asyncio
 async def test_flowchart_default_orientation_is_leftright(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -111,7 +111,7 @@ async def test_flowchart_default_orientation_is_leftright(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_flowchart_toggle_orientation_via_action(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -130,7 +130,7 @@ async def test_flowchart_toggle_orientation_via_action(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_flowchart_toggle_mode_filters_done_nodes(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -177,7 +177,7 @@ async def test_flowchart_toggle_mode_filters_done_nodes(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_flowchart_is_scrollable_container(tmp_path: Path) -> None:
     from textual.containers import ScrollableContainer
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -189,7 +189,7 @@ async def test_flowchart_is_scrollable_container(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_flowchart_scroll_actions_do_not_error(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -214,7 +214,7 @@ async def test_flowchart_scroll_actions_do_not_error(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_toggle_pane_layout_applies_vpanes_class(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )

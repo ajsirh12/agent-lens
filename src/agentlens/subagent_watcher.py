@@ -23,7 +23,7 @@ from .subagent_locator import SubagentLocator
 from .watcher import PollingTailer
 
 if TYPE_CHECKING:
-    from .app import HarnessVisualApp
+    from .app import AgentlensApp
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class SubagentWatcherManager:
 
     async def run(
         self,
-        app: "HarnessVisualApp | None" = None,
+        app: "AgentlensApp | None" = None,
         stop_event: asyncio.Event | None = None,
     ) -> None:
         log.debug(
@@ -74,7 +74,7 @@ class SubagentWatcherManager:
 
     def _discover_and_spawn(
         self,
-        app: "HarnessVisualApp | None",
+        app: "AgentlensApp | None",
         stop_event: asyncio.Event | None,
     ) -> None:
         for path in self._locator.list_files():
@@ -88,7 +88,7 @@ class SubagentWatcherManager:
     async def _run_tailer(
         self,
         tailer: PollingTailer,
-        app: "HarnessVisualApp | None",
+        app: "AgentlensApp | None",
         stop_event: asyncio.Event | None,
     ) -> None:
         try:

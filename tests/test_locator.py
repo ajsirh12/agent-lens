@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 
-from harness_visual.locator import SessionLocator
+from agentlens.locator import SessionLocator
 
 
 def test_find_active_picks_newest_in_slug(tmp_path: Path) -> None:

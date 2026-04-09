@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from harness_visual.events import EventType, HarnessEvent
-from harness_visual.graph_model import MAX_NODES, ROOT_ID, CallGraph
+from agentlens.events import EventType, HarnessEvent
+from agentlens.graph_model import MAX_NODES, ROOT_ID, CallGraph
 
 
 def _task_use(subagent: str, *, parent: str | None = None, tid: str = "t1") -> HarnessEvent:

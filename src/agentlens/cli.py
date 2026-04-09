@@ -1,4 +1,4 @@
-"""harness-visual CLI entry point."""
+"""agentlens CLI entry point."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="harness-visual",
+        prog="agentlens",
         description="Live-tail TUI for Claude Code sessions + OMC team state.",
     )
     p.add_argument("--session", type=Path, default=None, help="Path to a JSONL session file.")
@@ -53,9 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     # Import lazily so --help works without textual installed.
-    from .app import HarnessVisualApp
+    from .app import AgentlensApp
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=args.session,
         project_root=args.project_root,
         state_dir_override=args.state_dir,

@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from harness_visual.events import EventType, HarnessEvent
-from harness_visual.panels.timeline import MAX_PENDING, TimelinePanel
+from agentlens.events import EventType, HarnessEvent
+from agentlens.panels.timeline import MAX_PENDING, TimelinePanel
 
 
 def _make_event(
@@ -32,9 +32,9 @@ def _make_event(
 @pytest.mark.asyncio
 async def test_timeline_sanitizes_ansi_escape_in_cells(tmp_path: Path) -> None:
     """ANSI escape sequences in tool_name must be stripped from DataTable cells."""
-    from harness_visual.app import HarnessVisualApp
+    from agentlens.app import AgentlensApp
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -64,9 +64,9 @@ async def test_timeline_sanitizes_ansi_escape_in_cells(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_timeline_pending_use_cap_evicts_oldest(tmp_path: Path) -> None:
     """Feeding 2001 tool_use events should keep _pending_use at <= MAX_PENDING."""
-    from harness_visual.app import HarnessVisualApp
+    from agentlens.app import AgentlensApp
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -84,9 +84,9 @@ async def test_timeline_pending_use_cap_evicts_oldest(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_action_show_detail_passes_populated_input_summary(tmp_path: Path) -> None:
     """action_show_detail must pass a non-empty input_summary when input has a command."""
-    from harness_visual.app import HarnessVisualApp
+    from agentlens.app import AgentlensApp
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -134,10 +134,10 @@ async def test_action_show_detail_passes_populated_input_summary(tmp_path: Path)
 @pytest.mark.asyncio
 async def test_detail_modal_sanitizes_fields(tmp_path: Path) -> None:
     """ToolDetailScreen must strip ANSI and CR from all fields in rendered output."""
-    from harness_visual.app import HarnessVisualApp
-    from harness_visual.panels.detail_modal import ToolDetailScreen
+    from agentlens.app import AgentlensApp
+    from agentlens.panels.detail_modal import ToolDetailScreen
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from harness_visual.events import EventType, HarnessEvent
-from harness_visual.flowchart_layout import layout_topdown
-from harness_visual.graph_model import ROOT_ID, CallGraph
+from agentlens.events import EventType, HarnessEvent
+from agentlens.flowchart_layout import layout_topdown
+from agentlens.graph_model import ROOT_ID, CallGraph
 
 
 def _task(subagent: str, parent: str | None = None, tid: str = "x") -> HarnessEvent:
@@ -102,7 +102,7 @@ def test_left_align_stability() -> None:
 
 
 def test_leftright_root_only() -> None:
-    from harness_visual.flowchart_layout import layout_leftright
+    from agentlens.flowchart_layout import layout_leftright
     g = CallGraph()
     lay = layout_leftright(g)
     assert ROOT_ID in lay.nodes
@@ -110,7 +110,7 @@ def test_leftright_root_only() -> None:
 
 
 def test_leftright_siblings_stack_vertically() -> None:
-    from harness_visual.flowchart_layout import layout_leftright
+    from agentlens.flowchart_layout import layout_leftright
     g = CallGraph()
     g.update_from_event(_task("a", tid="t1"))
     g.update_from_event(_task("b", tid="t2"))
@@ -130,7 +130,7 @@ def test_leftright_canvas_width_scales_with_depth_not_siblings() -> None:
     """With 20 siblings at depth 1, left-right canvas width should stay
     bounded by 2 depths, not blow up proportionally to sibling count.
     """
-    from harness_visual.flowchart_layout import layout_leftright
+    from agentlens.flowchart_layout import layout_leftright
     g = CallGraph()
     for i in range(20):
         g.update_from_event(_task(f"s{i}", tid=f"t{i}"))

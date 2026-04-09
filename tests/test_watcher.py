@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.bus import EventBus
-from harness_visual.events import EventType
-from harness_visual.watcher import PollingTailer
+from agentlens.bus import EventBus
+from agentlens.events import EventType
+from agentlens.watcher import PollingTailer
 
 
 def _line(idx: int) -> str:
@@ -123,7 +123,7 @@ async def test_polling_tailer_handles_truncation(tmp_path: Path) -> None:
 def test_bus_line_count_is_at_most_30() -> None:
     from importlib.util import find_spec
 
-    spec = find_spec("harness_visual.bus")
+    spec = find_spec("agentlens.bus")
     assert spec is not None and spec.origin is not None
     lines = Path(spec.origin).read_text().splitlines()
     assert len(lines) <= 30, f"bus.py is {len(lines)} lines, must be ≤30"
@@ -164,7 +164,7 @@ def test_watcher_clears_head_fingerprint_on_rotation(tmp_path: Path) -> None:
 def test_watcher_drops_oversized_unterminated_line(tmp_path: Path) -> None:
     """A pathological file with no newline and >1 MiB content must be dropped
     rather than retained in _buffer, preventing unbounded memory growth."""
-    from harness_visual.watcher import MAX_BUFFER_BYTES
+    from agentlens.watcher import MAX_BUFFER_BYTES
 
     target = tmp_path / "big.jsonl"
     # Write more than MAX_BUFFER_BYTES with no newline character.
@@ -185,7 +185,7 @@ def test_watchfiles_fallback_copies_all_state(tmp_path: Path) -> None:
     import sys
     import unittest.mock as mock
 
-    from harness_visual.watcher import WatchfilesTailer
+    from agentlens.watcher import WatchfilesTailer
 
     target = tmp_path / "session.jsonl"
     target.write_bytes(b"")
@@ -205,7 +205,7 @@ def test_watchfiles_fallback_copies_all_state(tmp_path: Path) -> None:
 
     # Patch PollingTailer.run so we can inspect the constructed instance
     # without actually running the event loop poll.
-    with mock.patch("harness_visual.watcher.PollingTailer.run", _fake_run):
+    with mock.patch("agentlens.watcher.PollingTailer.run", _fake_run):
         # Force the ImportError branch by hiding watchfiles.
         with mock.patch.dict(sys.modules, {"watchfiles": None}):
             # run() is async; drive it with asyncio.run.

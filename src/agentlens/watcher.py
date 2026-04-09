@@ -17,7 +17,7 @@ from .events import HarnessEvent
 from .parser import parse_line
 
 if TYPE_CHECKING:
-    from .app import HarnessVisualApp
+    from .app import AgentlensApp
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class SessionWatcher:
     async def _deliver(
         self,
         event: HarnessEvent,
-        app: "HarnessVisualApp | None",
+        app: "AgentlensApp | None",
         bus: EventBus | None,
     ) -> None:
         if app is not None:
@@ -122,7 +122,7 @@ class SessionWatcher:
         return [ln.decode("utf-8", errors="replace") for ln in lines]
 
     async def _deliver_appended(
-        self, app: "HarnessVisualApp | None", bus: EventBus | None
+        self, app: "AgentlensApp | None", bus: EventBus | None
     ) -> None:
         for ln in self._read_appended():
             for ev in parse_line(ln):
@@ -130,7 +130,7 @@ class SessionWatcher:
 
     async def run(
         self,
-        app: "HarnessVisualApp | None" = None,
+        app: "AgentlensApp | None" = None,
         bus: EventBus | None = None,
         stop_event: asyncio.Event | None = None,
     ) -> None:
@@ -146,7 +146,7 @@ class PollingTailer(SessionWatcher):
 
     async def run(
         self,
-        app: "HarnessVisualApp | None" = None,
+        app: "AgentlensApp | None" = None,
         bus: EventBus | None = None,
         stop_event: asyncio.Event | None = None,
     ) -> None:
@@ -171,7 +171,7 @@ class WatchfilesTailer(SessionWatcher):
 
     async def run(
         self,
-        app: "HarnessVisualApp | None" = None,
+        app: "AgentlensApp | None" = None,
         bus: EventBus | None = None,
         stop_event: asyncio.Event | None = None,
     ) -> None:
@@ -206,8 +206,8 @@ class WatchfilesTailer(SessionWatcher):
 
 
 def make_tailer(path: Path) -> SessionWatcher:
-    """Factory: respects HARNESS_VISUAL_BACKEND=polling env override."""
-    if os.environ.get("HARNESS_VISUAL_BACKEND") == "polling":
+    """Factory: respects AGENTLENS_BACKEND=polling env override."""
+    if os.environ.get("AGENTLENS_BACKEND") == "polling":
         return PollingTailer(path)
     try:
         import watchfiles  # noqa: F401

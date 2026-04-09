@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.events import EventType
-from harness_visual.omc_state import OmcStateReader
+from agentlens.events import EventType
+from agentlens.omc_state import OmcStateReader
 
 
 @pytest.mark.asyncio

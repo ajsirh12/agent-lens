@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from harness_visual.events import EventType, HarnessEvent
-from harness_visual.graph_model import (
+from agentlens.events import EventType, HarnessEvent
+from agentlens.graph_model import (
     MAX_NESTED_DEPTH,
     ROOT_ID,
     CallGraph,
     Node,
 )
-from harness_visual import graph_model as gm
+from agentlens import graph_model as gm
 
 
 def _agent_use(subagent: str, *, tid: str) -> HarnessEvent:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
+from agentlens.app import AgentlensApp
 
 
 def _tool_use_line(idx: int) -> str:
@@ -41,7 +41,7 @@ def _tool_use_line(idx: int) -> str:
 async def test_launches_and_renders_empty(tmp_path: Path) -> None:
     empty_file = tmp_path / "empty.jsonl"
     empty_file.write_text("")
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=empty_file,
         state_dir_override=tmp_path / "state-absent",
     )
@@ -56,7 +56,7 @@ async def test_launches_and_renders_empty(tmp_path: Path) -> None:
 async def test_live_tail_latency_under_one_second(tmp_path: Path) -> None:
     target = tmp_path / "session.jsonl"
     target.write_text("")
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=target,
         state_dir_override=tmp_path / "state-absent",
     )

@@ -1,4 +1,4 @@
-# harness-visual 사용 가이드 (v0.2.0)
+# agentlens 사용 가이드 (v0.2.0)
 
 Claude Code 세션 JSONL 을 실시간 tail 해서 **Timeline + 라이브 Flowchart** 두 패널로
 보여주는 Python + Textual TUI. 서브에이전트 호출, 스킬 호출, 병렬 spawn 까지 그래프로
@@ -18,7 +18,7 @@ source .venv/bin/activate
 pip install -e '.[dev]'
 ```
 
-설치 후 venv 가 활성화된 상태에서 `harness-visual` 명령이 PATH 에 등록됩니다.
+설치 후 venv 가 활성화된 상태에서 `agentlens` 명령이 PATH 에 등록됩니다.
 
 ---
 
@@ -26,7 +26,7 @@ pip install -e '.[dev]'
 
 ### 기본 사용
 ```bash
-harness-visual
+agentlens
 ```
 - 현재 작업 디렉토리(`pwd`)를 slug 로 변환해 `~/.claude/projects/-Users-limdk-.../*.jsonl` 탐색.
 - 세션이 **2개 이상**이면 picker 모달이 떠서 mtime/크기/파일명을 보고 선택.
@@ -178,7 +178,7 @@ Running 모드의 instance 는 **자기 인스턴스의 breakdown** 만 표시 (
 
 | 변수 | 효과 |
 |---|---|
-| `HARNESS_VISUAL_BACKEND=polling` | `watchfiles` 대신 stdlib polling 강제 (오프라인/특수 환경) |
+| `AGENTLENS_BACKEND=polling` | `watchfiles` 대신 stdlib polling 강제 (오프라인/특수 환경) |
 
 ---
 
@@ -237,7 +237,7 @@ _render_text → Rich Text on Static
 
 ```bash
 # 터미널 A: fake session 을 attach 해서 띄우기
-harness-visual --session /tmp/fake.jsonl
+agentlens --session /tmp/fake.jsonl
 
 # 터미널 B: 가짜 JSONL 라인 생성
 python scripts/fake_session.py --target /tmp/fake.jsonl --count 200 --rate 10
@@ -264,10 +264,10 @@ pytest -q -k graph_model
 
 | 증상 | 원인 / 해결 |
 |---|---|
-| `command not found: harness-visual` | venv 비활성화. `source .venv/bin/activate` |
+| `command not found: agentlens` | venv 비활성화. `source .venv/bin/activate` |
 | `ImportError: textual` | `pip install -e '.[dev]'` 재실행 |
 | 빈 화면만 보임 | `~/.claude/projects/` 에 해당 cwd 의 slug 디렉토리가 없음 → `--session` 명시 |
-| 새 이벤트가 안 보임 | `HARNESS_VISUAL_BACKEND=polling` 강제, 또는 `--session` 으로 정확한 파일 지정 |
+| 새 이벤트가 안 보임 | `AGENTLENS_BACKEND=polling` 강제, 또는 `--session` 으로 정확한 파일 지정 |
 | Python 3.9 에서 실패 | 3.11+ 필요. Homebrew `python@3.12` 설치 |
 | `watchfiles` 설치 실패 | 자동으로 polling fallback. 무시 가능 |
 | 권한 오류 (`mission-state.json`) | omc_state 가 PermissionError 를 swallow. 필요시 `chmod +r` |
@@ -278,11 +278,11 @@ pytest -q -k graph_model
 
 ## 11. 다른 디렉토리에서 실행
 
-`harness-visual` 은 소스 디렉토리에 묶여 있지 않습니다. **현재 작업 디렉토리(`pwd`)** 기준으로 세션을 찾습니다:
+`agentlens` 은 소스 디렉토리에 묶여 있지 않습니다. **현재 작업 디렉토리(`pwd`)** 기준으로 세션을 찾습니다:
 
 ```bash
 # shell alias (~/.zshrc)
-alias hv='/Users/limdk/Documents/workspace/harness-visual/.venv/bin/harness-visual'
+alias hv='/Users/limdk/Documents/workspace/harness-visual/.venv/bin/agentlens'
 
 # 아무 프로젝트에서
 cd ~/Documents/workspace/some-other-project
@@ -297,7 +297,7 @@ hv --project-root ~/foo         # 다른 cwd 로 slug 계산
 
 | 항목 | 경로 |
 |---|---|
-| 패키지 소스 | `src/harness_visual/` |
+| 패키지 소스 | `src/agentlens/` |
 | 테스트 | `tests/` |
 | 실 세션 fixture | `tests/fixtures/real_session_slice.jsonl` |
 | JSONL 스키마 문서 | `docs/jsonl-schema-observed.md` |

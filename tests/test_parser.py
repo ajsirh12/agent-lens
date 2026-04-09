@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from harness_visual.events import EventType
-from harness_visual.parser import parse_line
+from agentlens.events import EventType
+from agentlens.parser import parse_line
 
 
 def test_empty_line_returns_empty_list():
@@ -87,7 +87,7 @@ def test_sidechain_row_gets_sub_agent_id():
 
 
 def test_parse_line_truncates_raw_line_at_cap():
-    from harness_visual.parser import MAX_RAW_LINE
+    from agentlens.parser import MAX_RAW_LINE
 
     # Build a valid tool_use JSONL line that is well over 100 KB by stuffing a
     # long string into the tool input.

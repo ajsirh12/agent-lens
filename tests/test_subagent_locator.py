@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from harness_visual.subagent_locator import SubagentLocator
+from agentlens.subagent_locator import SubagentLocator
 
 
 def test_subagents_dir_computation(tmp_path: Path) -> None:

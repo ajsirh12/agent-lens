@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
-from harness_visual.events import EventType, HarnessEvent
+from agentlens.app import AgentlensApp
+from agentlens.events import EventType, HarnessEvent
 
 
 def _spawn(aid: str) -> HarnessEvent:
@@ -31,7 +31,7 @@ def _tool(aid: str, idx: int) -> HarnessEvent:
 
 @pytest.mark.asyncio
 async def test_forward_timeline_cursor_to_app_reactive(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -56,7 +56,7 @@ async def test_forward_timeline_cursor_to_app_reactive(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_reverse_app_reactive_to_timeline(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )

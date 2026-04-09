@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
-from harness_visual.panels.session_picker import SessionPickerScreen
+from agentlens.app import AgentlensApp
+from agentlens.panels.session_picker import SessionPickerScreen
 
 
 def test_format_row_includes_mtime_size_and_name(tmp_path: Path) -> None:
@@ -48,7 +48,7 @@ async def test_app_shows_picker_when_two_candidates(
     (home / ".claude" / "projects").symlink_to(projects_root)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
 
-    app = HarnessVisualApp(project_root=fake_cwd, no_attach=False)
+    app = AgentlensApp(project_root=fake_cwd, no_attach=False)
     async with app.run_test() as pilot:
         await pilot.pause()
         # Picker should be on the screen stack.
@@ -82,13 +82,13 @@ async def test_auto_latest_skips_picker(
     (home / ".claude" / "projects").symlink_to(projects_root)
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         project_root=fake_cwd, no_attach=False, auto_latest=True
     )
     async with app.run_test() as pilot:
         await pilot.pause()
         # Picker should NOT be on screen.
-        from harness_visual.panels.session_picker import SessionPickerScreen as SPS
+        from agentlens.panels.session_picker import SessionPickerScreen as SPS
 
         assert not isinstance(app.screen, SPS)
         assert app.active_session_path is not None

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from harness_visual.events import EventType, HarnessEvent
-from harness_visual.graph_model import MAX_BREAKDOWN_TOOLS, ROOT_ID, CallGraph
-from harness_visual.parser import parse_line
+from agentlens.events import EventType, HarnessEvent
+from agentlens.graph_model import MAX_BREAKDOWN_TOOLS, ROOT_ID, CallGraph
+from agentlens.parser import parse_line
 
 
 def _agent_use(subagent: str, *, tid: str = "t1") -> HarnessEvent:

@@ -24,7 +24,7 @@ sessions for a week or two. Collect real pain points.
   instead of guessing.
 
 **How to run it**:
-- Keep `harness-visual` open during ordinary Claude Code work.
+- Keep `agentlens` open during ordinary Claude Code work.
 - Maintain an `observations.md` scratch file for annoyances or
   surprises as they happen.
 - After ~1 week, review the observations list and pick the single
@@ -143,7 +143,7 @@ class ActivityTracker:
         return "".join(chars) + f"  peak: {peak}/s"
 ```
 
-- Hook it into `HarnessVisualApp.on_harness_event_message` via
+- Hook it into `AgentlensApp.on_harness_event_message` via
   `self._activity.record()`.
 - Add to `_update_footer` / `_refresh_idle_footer` output.
 - Respect the existing footer wrap behavior.
@@ -297,7 +297,7 @@ the deep-interview spec's Definition of Done. These were left
 ### M-AC8-idle (footer shows "session idle" after 30s)
 
 **Procedure**:
-1. `harness-visual --latest` in one terminal.
+1. `agentlens --latest` in one terminal.
 2. Stop any activity in Claude Code for 35 seconds.
 3. Expect the footer to append `— session idle`.
 4. Confirm `j` / `k` still move the Timeline cursor.
@@ -307,8 +307,8 @@ the deep-interview spec's Definition of Done. These were left
 ### M-AC11 (idle CPU ≤ 2%)
 
 **Procedure**:
-1. Terminal A: `harness-visual --latest`.
-2. Terminal B: `top -pid $(pgrep -f harness_visual) -stats cpu`.
+1. Terminal A: `agentlens --latest`.
+2. Terminal B: `top -pid $(pgrep -f agentlens) -stats cpu`.
 3. Observe for 30 seconds while the session is idle.
 4. Record the average CPU% in
    `README.md → ## Manual Verification → M-AC11`.
@@ -317,7 +317,7 @@ the deep-interview spec's Definition of Done. These were left
 
 **Procedure**:
 1. Start `script(1)` or a screen recorder in a terminal.
-2. Run `harness-visual --latest` inside that recorded terminal.
+2. Run `agentlens --latest` inside that recorded terminal.
 3. Do real Claude Code work for 30–60 seconds so events come in.
 4. Stop recording. Drop the artifact in `docs/evidence/`.
 

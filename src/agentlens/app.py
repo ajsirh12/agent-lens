@@ -1,4 +1,4 @@
-"""HarnessVisualApp — Textual App wiring panels + watchers."""
+"""AgentlensApp — Textual App wiring panels + watchers."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from .watcher import SessionWatcher, make_tailer
 log = logging.getLogger(__name__)
 
 
-class HarnessVisualApp(App[int]):
+class AgentlensApp(App[int]):
     CSS_PATH = "app.tcss"
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -85,7 +85,7 @@ class HarnessVisualApp(App[int]):
             yield self._timeline
             self._flowchart = FlowchartPanel(id="flowchart")
             yield self._flowchart
-        self._footer = Static("harness-visual starting…", id="status-footer")
+        self._footer = Static("agentlens starting…", id="status-footer")
         yield self._footer
 
     async def on_mount(self) -> None:

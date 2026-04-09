@@ -1,10 +1,21 @@
 # Changelog
 
-All notable changes to harness-visual are documented here.
+All notable changes to agentlens are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is roughly semver for a personal tool: MINOR bumps ship
 user-visible behavior changes, PATCH bumps ship fixes only.
+
+---
+
+## [Unreleased]
+
+### Changed
+
+- Renamed Python package, CLI entry point, and environment
+  variable from harness-visual / HARNESS_VISUAL_BACKEND to
+  agentlens / AGENTLENS_BACKEND. The repository directory on
+  disk is unchanged — only the installable package name moved.
 
 ---
 

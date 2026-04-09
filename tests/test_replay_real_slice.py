@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from harness_visual.events import EventType
-from harness_visual.parser import parse_line
+from agentlens.events import EventType
+from agentlens.parser import parse_line
 
 FIXTURE = Path(__file__).parent / "fixtures" / "real_session_slice.jsonl"
 

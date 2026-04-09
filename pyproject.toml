@@ -3,13 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "harness-visual"
+name = "agentlens"
 version = "0.1.0"
 description = "Live-tail TUI for Claude Code sessions + OMC team state"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "harness-visual" }]
+authors = [{ name = "agentlens" }]
 dependencies = [
     "textual>=0.60",
     "watchfiles>=0.21",
@@ -24,10 +24,10 @@ dev = [
 ]
 
 [project.scripts]
-harness-visual = "harness_visual.cli:main"
+agentlens = "agentlens.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/harness_visual"]
+packages = ["src/agentlens"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

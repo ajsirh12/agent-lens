@@ -1,4 +1,4 @@
-"""python -m harness_visual entry point."""
+"""python -m agentlens entry point."""
 
 from .cli import main
 

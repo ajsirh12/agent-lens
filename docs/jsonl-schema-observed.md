@@ -4,7 +4,7 @@
 **Captured:** 2026-04-08
 **Line count:** 108 (full file sampled)
 
-This document is the source of truth for `src/harness_visual/parser.py`.
+This document is the source of truth for `src/agentlens/parser.py`.
 It is NOT a public Claude Code contract; the parser is schema-tolerant and
 falls back to `EventType.unknown` for any shape not listed here.
 

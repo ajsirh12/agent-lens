@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
-from harness_visual.panels.subagent_detail import SubagentDetailScreen
+from agentlens.app import AgentlensApp
+from agentlens.panels.subagent_detail import SubagentDetailScreen
 
 
 @pytest.mark.asyncio
 async def test_subagent_detail_screen_with_events(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state",
         no_attach=True,
@@ -47,7 +47,7 @@ async def test_subagent_detail_screen_with_events(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_subagent_detail_screen_empty(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state",
         no_attach=True,

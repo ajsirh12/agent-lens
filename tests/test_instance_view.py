@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
-from harness_visual.events import EventType, HarnessEvent
-from harness_visual.graph_model import MAX_BREAKDOWN_TOOLS, ROOT_ID, CallGraph
+from agentlens.app import AgentlensApp
+from agentlens.events import EventType, HarnessEvent
+from agentlens.graph_model import MAX_BREAKDOWN_TOOLS, ROOT_ID, CallGraph
 
 
 def _agent_use(
@@ -119,7 +119,7 @@ def test_instance_linked_subagent_uuid_set_from_tool_result() -> None:
 
 @pytest.mark.asyncio
 async def test_running_subgraph_expands_instances(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -144,7 +144,7 @@ async def test_running_subgraph_expands_instances(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_all_mode_unchanged_by_instances(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -171,7 +171,7 @@ async def test_all_mode_unchanged_by_instances(tmp_path: Path) -> None:
 async def test_nested_node_without_instances_falls_back_to_single(
     tmp_path: Path,
 ) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -210,7 +210,7 @@ async def test_nested_node_without_instances_falls_back_to_single(
 
 @pytest.mark.asyncio
 async def test_cross_highlight_sets_base_id_not_virtual(tmp_path: Path) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -295,7 +295,7 @@ def test_instance_breakdown_updates_independently_per_instance() -> None:
 async def test_running_subgraph_uses_instance_breakdown_not_node(
     tmp_path: Path,
 ) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -468,7 +468,7 @@ async def test_virtual_node_tool_breakdown_copied_from_instance_object(
     Instance object, not from the node-level aggregate.  A 'ghost' tool
     that only exists in the node aggregate must NOT appear in either
     virtual node's breakdown."""
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -530,7 +530,7 @@ async def test_virtual_node_tool_breakdown_copied_from_instance_object(
 async def test_click_on_virtual_node_records_tool_use_id(
     tmp_path: Path,
 ) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -585,7 +585,7 @@ async def test_drill_down_uses_instance_subagent_uuid(
     file_u1.write_text("")
     file_u2.write_text("")
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=session_path,
         state_dir_override=tmp_path / "state-absent",
     )
@@ -655,7 +655,7 @@ async def test_drill_down_falls_back_to_node_when_no_virtual_selected(
     file_u1.write_text("")
     file_u2.write_text("")
 
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=session_path,
         state_dir_override=tmp_path / "state-absent",
     )
@@ -706,7 +706,7 @@ async def test_drill_down_falls_back_to_node_when_no_virtual_selected(
 async def test_running_subgraph_clears_virtual_tid_map_each_rebuild(
     tmp_path: Path,
 ) -> None:
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )
@@ -754,7 +754,7 @@ async def test_only_clicked_virtual_instance_highlights(tmp_path: Path) -> None:
     the same base id. Timeline-driven selection (no tid recorded) still
     falls back to base-id matching.
     """
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=tmp_path / "empty.jsonl",
         state_dir_override=tmp_path / "state-absent",
     )

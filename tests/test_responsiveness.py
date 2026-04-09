@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from harness_visual.app import HarnessVisualApp
-from harness_visual.events import EventType, HarnessEvent
+from agentlens.app import AgentlensApp
+from agentlens.events import EventType, HarnessEvent
 
 
 @pytest.mark.asyncio
 async def test_keypress_repaint_under_200ms(tmp_path: Path) -> None:
     target = tmp_path / "empty.jsonl"
     target.write_text("")
-    app = HarnessVisualApp(
+    app = AgentlensApp(
         session_override=target,
         state_dir_override=tmp_path / "state-absent",
     )

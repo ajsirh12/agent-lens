@@ -1,4 +1,4 @@
-# harness-visual
+# agentlens
 
 Live-tail TUI for Claude Code sessions. Shows a Timeline of tool calls
 alongside a real-time Flowchart of agent and skill spawns, including
@@ -77,19 +77,19 @@ pip install -e '.[dev]'
 ## Run
 
 ```bash
-harness-visual                       # auto-pick newest session in cwd's slug dir
-harness-visual --latest              # skip picker, take newest
-harness-visual --session PATH        # attach a specific JSONL
-harness-visual --project-root PATH   # compute slug from a different cwd
-harness-visual --self-test           # render one frame, exit 0 (CI smoke)
-harness-visual -v                    # verbose logging
+agentlens                            # auto-pick newest session in cwd's slug dir
+agentlens --latest                   # skip picker, take newest
+agentlens --session PATH             # attach a specific JSONL
+agentlens --project-root PATH        # compute slug from a different cwd
+agentlens --self-test                # render one frame, exit 0 (CI smoke)
+agentlens -v                         # verbose logging
 ```
 
-If `watchfiles` can't be installed, set `HARNESS_VISUAL_BACKEND=polling`
+If `watchfiles` can't be installed, set `AGENTLENS_BACKEND=polling`
 to force the stdlib polling tailer:
 
 ```bash
-HARNESS_VISUAL_BACKEND=polling harness-visual
+AGENTLENS_BACKEND=polling agentlens
 ```
 
 See [`docs/USAGE.md`](docs/USAGE.md) for the full usage guide,
