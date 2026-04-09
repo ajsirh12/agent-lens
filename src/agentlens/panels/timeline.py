@@ -41,6 +41,10 @@ class TimelinePanel(Container):
         self._updating = False
         self._row_count = 0
         self.max_rows = max_rows
+        # Follow-bottom is a Textual refresh-coalesced operation: many
+        # add_events in one frame result in a single cursor move at the
+        # next refresh tick instead of 500 redundant move_cursor calls.
+        self._scroll_pending = False
 
     def compose(self) -> ComposeResult:
         self._placeholder = Static("waiting for events…", classes="placeholder")
@@ -70,6 +74,12 @@ class TimelinePanel(Container):
         """Public entrypoint (also used by tests) to append a row."""
         if self._table is None:
             return
+        # Capture "follow mode" BEFORE we mutate the table. If the user
+        # was already looking at the bottom row (the live tail) we want
+        # the new row to be the new bottom and the cursor to stick to
+        # it. If the user has scrolled up to inspect an older event we
+        # leave them alone.
+        was_at_bottom = self._was_at_bottom()
         if ev.type == EventType.tool_use:
             tid = ev.tool_use_id or ""
             ts_str = ev.ts.strftime("%H:%M:%S")
@@ -114,6 +124,8 @@ class TimelinePanel(Container):
                 del self._row_input[oldest_key]
             self._hide_placeholder()
             self._enforce_cap()
+            if was_at_bottom:
+                self._scroll_to_end()
         elif ev.type == EventType.tool_result:
             tid = ev.tool_use_id or ""
             if tid and tid in self._tool_use_row:
@@ -141,6 +153,8 @@ class TimelinePanel(Container):
                 self._row_count += 1
                 self._hide_placeholder()
                 self._enforce_cap()
+                if was_at_bottom:
+                    self._scroll_to_end()
 
     def _row_index(self, row_key: Any) -> int:
         assert self._table is not None
@@ -166,6 +180,68 @@ class TimelinePanel(Container):
     def _hide_placeholder(self) -> None:
         if self._placeholder is not None and self._placeholder.display:
             self._placeholder.display = False
+
+    # --- follow-the-bottom (tail -f style) ------------------------------
+
+    def _was_at_bottom(self) -> bool:
+        """True when the cursor is on the last row (or the table is
+        empty / cursor-less). Call BEFORE mutating rows.
+
+        Uses the cached ``_row_count`` (O(1)) instead of materializing
+        the DataTable's row dict, so this is cheap to call on every
+        add_event even in bursty ingestion scenarios.
+        """
+        if self._table is None:
+            return True
+        total = self._row_count
+        if total == 0:
+            return True
+        cursor = self._table.cursor_row
+        if cursor is None or cursor < 0:
+            return True
+        return cursor >= total - 1
+
+    def _scroll_to_end(self) -> None:
+        """Schedule a cursor-pull to the last row on the next refresh.
+
+        Many add_events within a single frame (bulk ingestion, tests,
+        catch-up at startup) would otherwise trigger N redundant
+        move_cursor calls. We coalesce them into a single
+        ``call_after_refresh`` callback via the ``_scroll_pending``
+        flag — the first call arms it, subsequent calls in the same
+        frame are no-ops, and the deferred handler runs once after
+        the DataTable has settled.
+        """
+        if self._table is None or self._scroll_pending:
+            return
+        self._scroll_pending = True
+        try:
+            self.call_after_refresh(self._do_scroll_to_end)
+        except Exception:
+            # If call_after_refresh isn't available (pre-mount, test
+            # shims, etc.), fall back to running the move synchronously.
+            self._scroll_pending = False
+            self._do_scroll_to_end()
+
+    def _do_scroll_to_end(self) -> None:
+        """Deferred callback that actually moves the cursor. Guarded
+        with ``_updating`` so the resulting row-highlighted event does
+        not recurse into the cross-highlight path.
+        """
+        self._scroll_pending = False
+        if self._table is None:
+            return
+        total = self._row_count
+        if total == 0:
+            return
+        self._updating = True
+        try:
+            try:
+                self._table.move_cursor(row=total - 1, animate=False)
+            except Exception:
+                pass
+        finally:
+            self._updating = False
 
     # --- cross-highlight -------------------------------------------------
 
@@ -236,6 +312,7 @@ class TimelinePanel(Container):
         self._row_message = {}
         self._updating = False
         self._row_count = 0
+        self._scroll_pending = False
         if self._table is None:
             return
         try:
