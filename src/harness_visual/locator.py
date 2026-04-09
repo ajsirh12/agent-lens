@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-ChosenReason = Literal["slug", "fallback", "none"]
+ChosenReason = Literal["slug", "fallback", "none", "override", "picker"]
 
 
 @dataclass

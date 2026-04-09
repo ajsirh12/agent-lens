@@ -134,15 +134,6 @@ class OmcStateReader:
                             )
                         )
 
-        # sessions/{id}/ is optional — only probe if present.
-        sessions = self.state_dir / "sessions"
-        if sessions.is_dir():
-            try:
-                for _ in sessions.iterdir():
-                    break  # existence check only; cheap
-            except (PermissionError, FileNotFoundError):
-                pass
-
         return events
 
     async def run(

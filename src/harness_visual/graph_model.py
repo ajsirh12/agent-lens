@@ -13,6 +13,7 @@ Filtering policy (locked decision):
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -572,7 +573,7 @@ class CallGraph:
             return 0
         return max(depths.values())
 
-    def _compute_depths(self) -> dict[str, int]:
+    def compute_depths(self) -> dict[str, int]:
         """BFS depths from ROOT_ID. With parent-must-exist enforcement in
         _handle_tool_use, every node is reachable from root, so no
         fallback pinning is needed.
@@ -583,11 +584,11 @@ class CallGraph:
         for (p, c) in self.edges.keys():
             adj.setdefault(p, []).append(c)
 
-        # BFS — use a list as a queue, preserving insertion order.
-        queue: list[str] = [ROOT_ID]
+        # BFS — use deque for O(1) popleft.
+        queue: deque[str] = deque([ROOT_ID])
         visited: set[str] = {ROOT_ID}
         while queue:
-            cur = queue.pop(0)
+            cur = queue.popleft()
             for child in adj.get(cur, []):
                 if child in visited:
                     continue
@@ -596,3 +597,7 @@ class CallGraph:
                 queue.append(child)
 
         return depths
+
+    def _compute_depths(self) -> dict[str, int]:
+        """Back-compat alias for compute_depths()."""
+        return self.compute_depths()

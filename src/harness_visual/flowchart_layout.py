@@ -57,7 +57,7 @@ def layout_topdown(
     """
     # Compute depth of every node from root via BFS preserving insertion
     # order — same approach as CallGraph._compute_depths.
-    depths = _bfs_depths(graph)
+    depths = graph.compute_depths()
     max_depth = max(depths.values()) if depths else 0
 
     # Group node ids by depth, preserving graph.nodes insertion order.
@@ -115,23 +115,6 @@ def layout_topdown(
     )
 
 
-def _bfs_depths(graph: CallGraph) -> dict[str, int]:
-    depths: dict[str, int] = {ROOT_ID: 0}
-    adj: dict[str, list[str]] = {}
-    for (p, c) in graph.edges.keys():
-        adj.setdefault(p, []).append(c)
-    queue: list[str] = [ROOT_ID]
-    visited: set[str] = {ROOT_ID}
-    while queue:
-        cur = queue.pop(0)
-        for child in adj.get(cur, []):
-            if child in visited:
-                continue
-            visited.add(child)
-            depths[child] = depths[cur] + 1
-            queue.append(child)
-    return depths
-
 
 def _route_edge(parent: NodePos, child: NodePos) -> list[tuple[int, int]]:
     """Return a list of (row, col) cells for a parent→child edge."""
@@ -180,7 +163,7 @@ def layout_leftright(
     fan out heavily from root (many direct children of ``main``) since
     it stacks them vertically rather than running off the right edge.
     """
-    depths = _bfs_depths(graph)
+    depths = graph.compute_depths()
     max_depth = max(depths.values()) if depths else 0
 
     by_depth: dict[int, list[str]] = {}
