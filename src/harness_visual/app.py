@@ -233,35 +233,26 @@ class HarnessVisualApp(App[int]):
     # --- actions ---------------------------------------------------------
 
     def action_cursor_down(self) -> None:
-        if self._timeline is not None and self._timeline._table is not None:
-            try:
-                self._timeline._table.action_cursor_down()
-            except Exception:
-                pass
+        if self._timeline is not None:
+            self._timeline.move_cursor("down")
 
     def action_cursor_up(self) -> None:
-        if self._timeline is not None and self._timeline._table is not None:
-            try:
-                self._timeline._table.action_cursor_up()
-            except Exception:
-                pass
+        if self._timeline is not None:
+            self._timeline.move_cursor("up")
 
     def action_show_detail(self) -> None:
-        if self._timeline is None or self._timeline._table is None:
+        if self._timeline is None:
             return
-        tbl = self._timeline._table
-        try:
-            row = tbl.cursor_row
-            cells = [tbl.get_cell_at((row, c)) for c in range(5)]
-        except Exception:
+        cells = self._timeline.get_selected_row_cells()
+        if cells is None:
             return
         # cells: ts, tool, agent, status, dur_ms
         self.push_screen(
             ToolDetailScreen(
-                tool_name=str(cells[1]),
-                input_summary="",
-                status=str(cells[3]),
-                duration_ms=str(cells[4]),
+                tool_name=cells[1],
+                input_summary=self._timeline.get_selected_input_summary(),
+                status=cells[3],
+                duration_ms=cells[4],
             )
         )
 

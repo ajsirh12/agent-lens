@@ -8,6 +8,13 @@ from textual.screen import ModalScreen
 from textual.widgets import Static
 
 
+def _sanitize_cell(s: object) -> str:
+    """Strip non-printable / ANSI-escape characters and cap length."""
+    text = str(s)
+    text = "".join(c for c in text if (c.isprintable() or c == "\t") and c not in "\x1b\r")
+    return text[:500]
+
+
 class ToolDetailScreen(ModalScreen[None]):
     BINDINGS = [("escape", "dismiss", "Close"), ("enter", "dismiss", "Close")]
 
@@ -25,11 +32,15 @@ class ToolDetailScreen(ModalScreen[None]):
         self.duration_ms = duration_ms
 
     def compose(self) -> ComposeResult:
+        tool_name = _sanitize_cell(self.tool_name)
+        input_summary = _sanitize_cell(self.input_summary)
+        status = _sanitize_cell(self.status)
+        duration_ms = _sanitize_cell(self.duration_ms)
         with Vertical(id="detail-body"):
-            yield Static(f"Tool:     {self.tool_name}")
-            yield Static(f"Input:    {self.input_summary}")
-            yield Static(f"Status:   {self.status}")
-            yield Static(f"Duration: {self.duration_ms} ms")
+            yield Static(f"Tool:     {tool_name}")
+            yield Static(f"Input:    {input_summary}")
+            yield Static(f"Status:   {status}")
+            yield Static(f"Duration: {duration_ms} ms")
             yield Static("(Esc / Enter to close)", classes="placeholder")
 
     def action_dismiss(self) -> None:  # type: ignore[override]

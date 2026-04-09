@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any
+import logging
+from typing import Any, Literal
 
 from textual.app import ComposeResult
 from textual.containers import Container
@@ -10,6 +11,17 @@ from textual.widgets import DataTable, Static
 
 from ..events import EventType, HarnessEvent
 from ..messages import HarnessEventMessage
+
+log = logging.getLogger(__name__)
+
+MAX_PENDING = 2000
+
+
+def _sanitize_cell(s: object) -> str:
+    """Strip non-printable / ANSI-escape characters and cap length."""
+    text = str(s)
+    text = "".join(c for c in text if (c.isprintable() or c == "\t") and c not in "\x1b\r")
+    return text[:500]
 
 
 class TimelinePanel(Container):
@@ -25,6 +37,7 @@ class TimelinePanel(Container):
         self._row_agent: dict[Any, str | None] = {}  # row_key -> agent_id
         self._row_message: dict[Any, str | None] = {}
         self._tool_use_row: dict[str, Any] = {}  # tool_use_id -> row_key
+        self._row_input: dict[Any, str] = {}  # row_key -> input preview
         self._updating = False
         self._row_count = 0
         self.max_rows = max_rows
@@ -62,8 +75,8 @@ class TimelinePanel(Container):
             ts_str = ev.ts.strftime("%H:%M:%S")
             row_key = self._table.add_row(
                 ts_str,
-                ev.tool_name or "?",
-                (ev.agent_id or "-")[:20],
+                _sanitize_cell(ev.tool_name or "?"),
+                _sanitize_cell((ev.agent_id or "-")[:20]),
                 "running",
                 "-",
             )
@@ -72,7 +85,33 @@ class TimelinePanel(Container):
             self._row_message[row_key] = ev.message_id
             if tid:
                 self._tool_use_row[tid] = row_key
+                if len(self._tool_use_row) > MAX_PENDING:
+                    oldest_key = next(iter(self._tool_use_row))
+                    del self._tool_use_row[oldest_key]
                 self._pending_use[tid] = ev.ts.timestamp()
+                # Evict oldest if cap exceeded.
+                if len(self._pending_use) > MAX_PENDING:
+                    oldest_key = next(iter(self._pending_use))
+                    del self._pending_use[oldest_key]
+                    log.debug("pending_use cap hit: evicting %s", oldest_key)
+            # Store input preview for modal.
+            inp = ev.payload.get("input")
+            input_preview = ""
+            if isinstance(inp, dict):
+                for key in ("command", "path", "file_path", "pattern", "description", "subagent_type", "skill"):
+                    v = inp.get(key)
+                    if isinstance(v, str) and v:
+                        input_preview = v
+                        break
+                if not input_preview:
+                    input_preview = str(inp)[:120]
+            elif inp is not None:
+                input_preview = str(inp)[:120]
+            self._row_input[row_key] = input_preview
+            # Evict oldest _row_input if cap exceeded.
+            if len(self._row_input) > MAX_PENDING:
+                oldest_key = next(iter(self._row_input))
+                del self._row_input[oldest_key]
             self._hide_placeholder()
             self._enforce_cap()
         elif ev.type == EventType.tool_result:
@@ -163,3 +202,42 @@ class TimelinePanel(Container):
             pass
         finally:
             self._updating = False
+
+    # --- public API (used by app.py) -------------------------------------
+
+    def move_cursor(self, direction: Literal["up", "down"]) -> None:
+        """Move the DataTable cursor up or down one row."""
+        if self._table is None:
+            return
+        try:
+            if direction == "down":
+                self._table.action_cursor_down()
+            else:
+                self._table.action_cursor_up()
+        except Exception:
+            pass
+
+    def get_selected_row_cells(self) -> list[str] | None:
+        """Return the 5 cell values for the currently-selected row, or None."""
+        if self._table is None:
+            return None
+        try:
+            row = self._table.cursor_row
+            return [_sanitize_cell(self._table.get_cell_at((row, c))) for c in range(5)]
+        except Exception:
+            return None
+
+    def get_selected_input_summary(self) -> str:
+        """Return the stored input preview for the currently-selected row, or ''."""
+        if self._table is None:
+            return ""
+        try:
+            row = self._table.cursor_row
+            # Find which row_key corresponds to the cursor row index.
+            keys = list(self._table.rows.keys())
+            if row < 0 or row >= len(keys):
+                return ""
+            row_key = keys[row]
+            return self._row_input.get(row_key, "")
+        except Exception:
+            return ""
