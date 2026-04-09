@@ -176,6 +176,24 @@ async def test_shift_s_pushes_path_input_modal(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_uppercase_s_also_pushes_path_input_modal(tmp_path: Path) -> None:
+    """A real terminal on Shift+s sends the literal 'S' character, which
+    Textual routes to the "S" binding rather than "shift+s". Both forms
+    must open the modal.
+    """
+    (tmp_path / "empty.jsonl").write_text("")
+    app = AgentlensApp(
+        session_override=tmp_path / "empty.jsonl",
+        state_dir_override=tmp_path / "state-absent",
+    )
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("S")
+        await pilot.pause()
+        assert isinstance(app.screen, SessionPathInputScreen)
+
+
+@pytest.mark.asyncio
 async def test_open_session_path_swaps_active_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

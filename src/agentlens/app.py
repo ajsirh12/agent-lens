@@ -50,7 +50,12 @@ class AgentlensApp(App[int]):
         ("home", "flowchart_scroll_home", "Flow ⇱"),
         ("end", "flowchart_scroll_end", "Flow ⇲"),
         ("s", "switch_session", "Switch session"),
+        # Bind BOTH forms: Textual's pilot.press("shift+s") synthesizes
+        # the modifier-prefixed key directly, while a real terminal just
+        # sends the uppercase character 'S' on Shift+s. Registering both
+        # names makes the binding work in tests AND in a live TTY.
         ("shift+s", "open_session_path", "Open session by path"),
+        ("S", "open_session_path", "Open session by path"),
     ]
 
     selected_agent_id: reactive[str | None] = reactive(None)
