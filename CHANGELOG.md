@@ -8,6 +8,70 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Paste-a-path modal via `Shift+S`** (`panels/session_path_input.py`).
+  Pushes a modal with a single Input field. Paste a JSONL path (or a
+  bare session id / prefix), press Enter, and the app swaps the
+  active session without restarting. Validation is inline: existing
+  file, is-a-file, `.jsonl` suffix, otherwise a red error stays
+  visible and the modal keeps focus. `Esc` cancels; submitting the
+  currently-attached file is a no-op. Intended as an escape hatch
+  when the regular `s` picker cannot surface the intended session —
+  notably on Windows / git-bash where the slug convention may not
+  match.
+- **Session id / prefix lookup in the paste-path modal.** If the
+  input contains no path separators and no `.jsonl` suffix it is
+  treated as a bare session id. The modal globs
+  `~/.claude/projects/*/<id>*.jsonl` across every project subdir.
+  Exactly one match → attach. Multiple matches → inline count with
+  "paste the full path instead". Zero matches → inline "not found".
+  Full UUIDs and short prefixes both work as long as the prefix is
+  unique, so users can paste `b0709256` instead of the full path.
+- **Path-independent cwd-field fallback in `SessionLocator`.** When
+  the slug-based lookup misses (no directory under
+  `~/.claude/projects/<slug>/`), `find_candidates()` and
+  `find_active()` now scan every project subdir, peek at the first
+  row of each JSONL, and match on the recorded `cwd` field. New
+  `chosen_reason` value: `"cwd-match"`. Robust to unknown / future
+  Claude Code slug conventions — the `cwd` field is present on
+  every session row, so matching on it is OS-independent and
+  survives slug-naming changes. POSIX users still hit the slug
+  fast path and pay zero overhead.
+- `_norm()` helper in `locator.py` that normalizes path separators,
+  strips trailing slashes, and case-folds Windows drive-letter
+  paths (`C:\Users\limdk` ≡ `c:/users/limdk`). Used by the cwd
+  fallback so Windows-style and POSIX-style paths compare equal.
+
+### Fixed
+
+- **`Shift+S` binding now fires in a real terminal.** The binding
+  was registered as `"shift+s"` only, which matched
+  `pilot.press("shift+s")` in tests but failed in a live TTY
+  because terminals send the literal uppercase character `S` on
+  Shift+s and Textual routes that to a binding named `"S"` — not
+  `"shift+s"`. Registering both forms under the same action makes
+  the key work everywhere. Covered by
+  `test_uppercase_s_also_pushes_path_input_modal`.
+
+### Changed
+
+- `ChosenReason` Literal in `locator.py` extended with
+  `"cwd-match"`, `"switched"`, and `"path-input"`. The first two
+  were already in use at runtime but had been missing from the
+  declared type; the third is new with the `Shift+S` modal.
+
+### Tests
+
+- Full suite: 133 → 157 passing (+24). New files:
+  `tests/test_session_path_input.py` (17 tests covering validation,
+  uppercase-S binding, session id lookup, and cancel paths) and
+  expanded `tests/test_locator.py` (+7 Windows / cwd-match tests).
+
+---
+
 ## [0.3.0] - 2026-04-09
 
 Rename + mid-session switch + Definition-of-Done closeout. 133 tests

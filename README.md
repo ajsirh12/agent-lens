@@ -60,6 +60,16 @@ nested subagent trees and parallel-instance views.
   runtime to switch to a different session in the same directory
   without restarting — Timeline and Flowchart rebuild for the new
   session automatically.
+- **Paste-a-path escape hatch via `Shift+S`.** Opens an Input
+  modal that accepts either a full JSONL path or a bare session
+  id / prefix (`b0709256`). Glob-resolves the id across every
+  project subdir and attaches the match, so you can recover the
+  right session even when the slug-based picker fails (e.g. on
+  Windows / git-bash where the path format differs).
+- **Windows / git-bash compatibility**: the locator falls back to
+  matching each JSONL's recorded `cwd` field when the slug
+  directory lookup misses, so sessions still resolve on platforms
+  whose slug convention this tool doesn't natively know.
 - **Subagent watcher** automatically discovers and tails new
   `agent-*.jsonl` files as they're created under the session's
   `subagents/` directory.
@@ -102,7 +112,7 @@ architecture notes.
 ## Tests
 
 ```bash
-pytest -q           # 133 tests
+pytest -q           # 157 tests
 ```
 
 ## Manual Verification

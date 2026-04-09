@@ -92,6 +92,7 @@ agentlens
 | `Enter` | 선택된 timeline row 의 상세 모달 (tool name / input / status / duration) |
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
 | `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
+| `Shift+S` | 경로/세션 ID 붙여넣기 모달 — 임의의 JSONL 파일 또는 session id prefix 로 전환 |
 
 ### Flowchart 모드 토글
 
@@ -125,6 +126,47 @@ agentlens
 - 현재 파일 선택 → no-op
 - `Esc` → 취소, 상태 변화 없음
 - 후보가 0개면 picker 안 뜸
+
+### 경로/ID 붙여넣기 전환 (`Shift+S` 키)
+
+`s` 키의 picker 가 원하는 세션을 못 찾는 경우 (예: Windows / git-bash 에서 slug 규칙이 달라 매칭 실패) **`Shift+S`** 를 누르면 Input 모달이 뜹니다. 터미널에서 복사한 경로나 session id 를 붙여넣고 Enter 치면 바로 attach.
+
+입력 형식 3가지:
+
+| 형식 | 예시 | 처리 |
+|---|---|---|
+| 전체 경로 | `~/.claude/projects/xxx/abc.jsonl` | `~` expand, 따옴표 strip |
+| Windows / MSYS 경로 | `/c/Users/limdk/.../abc.jsonl` | Path 가 자동 처리 |
+| **세션 ID 또는 prefix** | `b0709256-eb61-4ccb-9b57-49aaca263c33` 또는 `b0709256` | `~/.claude/projects/*/<id>*.jsonl` glob → unique 매칭 시 attach |
+
+검증 규칙:
+- 존재하지 않는 파일 → 빨간 에러 ("File not found"), 모달 유지
+- 디렉토리나 `.jsonl` 이 아닌 파일 → 에러
+- Session id prefix 가 여러 개 매칭 → "N sessions matched, paste full path" 에러
+- Session id prefix 가 0개 매칭 → "No session found for id/prefix" 에러
+- `Esc` → 취소, 상태 변화 없음
+
+전환 후 footer 의 `locator_reason` 이 `[path-input]` 으로 표시됩니다.
+
+**Windows / git-bash 에서의 권장 사용:** 터미널에서 `resume` 명령 등으로 확인한 session UUID (`b0709256...`) 의 앞 8자만 복사해 `Shift+S` → paste → Enter. Slug 계산을 완전히 우회하므로 Windows 경로 포맷 이슈와 무관하게 작동합니다.
+
+### Windows / git-bash 호환 (cwd-match fallback)
+
+기본 slug 계산 (`str(cwd).replace("/", "-")`) 은 POSIX 경로에 맞춰져 있어서 Windows 의 backslash 경로나 git-bash 의 `/c/...` MSYS 경로에서는 slug 디렉토리 매칭에 실패할 수 있습니다.
+
+이 경우 `SessionLocator` 는 자동으로 **cwd-field fallback** 을 실행합니다:
+
+1. Slug 디렉토리가 없으면 `~/.claude/projects/` 전체 서브디렉토리를 스캔
+2. 각 JSONL 의 **첫 row `cwd` 필드** 를 읽어 현재 `Path.cwd()` 와 normalize 후 비교
+3. 매칭되는 파일들을 mtime desc 로 반환
+4. `locator_reason` 은 `[cwd-match]` 로 표시
+
+정규화 규칙 (`_norm()`):
+- Backslash → forward slash (`C:\` → `C:/`)
+- Trailing separator strip
+- Windows 드라이브 경로 (`C:` 시작) 는 case-fold (`C:/Users` ≡ `c:/users`)
+
+POSIX 사용자는 slug fast path 에서 곧바로 매칭되므로 이 fallback 을 거치지 않고 오버헤드 0 입니다.
 
 전환 후 footer 의 `locator_reason` 이 `[switched]` 로 표시되어 전환된 세션임을 구분할 수 있습니다.
 
