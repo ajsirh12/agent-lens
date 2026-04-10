@@ -297,15 +297,33 @@ class AgentlensApp(App[int]):
     def action_drill_down(self) -> None:
         """Open the SubagentDetailScreen for the currently selected
         agent node, loading its linked subagent JSONL file on demand.
+
+        Every failure path now surfaces a notification so the user
+        can tell WHY drill-down didn't open (instead of silently
+        no-opping).
         """
         if self._flowchart is None:
             return
         nid = self.selected_agent_id
         if not nid:
+            try:
+                self.notify("No agent selected — click a flowchart node first", severity="warning")
+            except Exception:
+                pass
             return
         graph = self._flowchart._graph
         node = graph.nodes.get(nid)
-        if node is None or node.node_type != "agent":
+        if node is None:
+            try:
+                self.notify(f"Node '{nid}' not in graph (session switched?)", severity="warning")
+            except Exception:
+                pass
+            return
+        if node.node_type != "agent":
+            try:
+                self.notify(f"'{node.label}' is {node.node_type}, not an agent — drill-down requires an agent node", severity="warning")
+            except Exception:
+                pass
             return
         # Prefer the specific instance the user clicked. Fall back to the
         # node-level link if no virtual node was selected (single-spawn
@@ -336,6 +354,13 @@ class AgentlensApp(App[int]):
                     break
             if target is not None:
                 events = self._load_subagent_events(target)
+            else:
+                log.debug("drill-down: subagent file not found for uuid=%s", sub_uuid)
+        elif not sub_uuid:
+            log.debug(
+                "drill-down: no subagent_uuid on node=%s (tool_result may not have arrived yet)",
+                nid,
+            )
         self.push_screen(
             SubagentDetailScreen(
                 node_label=node.label + instance_label_suffix,
