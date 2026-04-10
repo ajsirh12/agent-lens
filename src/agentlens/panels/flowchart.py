@@ -437,9 +437,13 @@ class FlowchartPanel(ScrollableContainer):
         if self._updating:
             return
         # Convert click coordinates to a (row, col) within our canvas.
+        # FlowchartPanel is a ScrollableContainer, so event.x/y are
+        # relative to the VISIBLE viewport. The layout node positions
+        # are in absolute canvas coordinates. We must add the scroll
+        # offset so a click after scrolling still hits the right node.
         try:
-            x = int(getattr(event, "x", 0))
-            y = int(getattr(event, "y", 0))
+            x = int(getattr(event, "x", 0)) + int(self.scroll_x)
+            y = int(getattr(event, "y", 0)) + int(self.scroll_y)
         except Exception:
             return
         for nid, pos in self._layout.nodes.items():
