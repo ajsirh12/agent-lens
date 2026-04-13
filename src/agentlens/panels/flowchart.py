@@ -107,6 +107,7 @@ class FlowchartPanel(ScrollableContainer):
         self._mode: Mode = mode
         self._virtual_to_tid: dict[str, str] = {}
         self._selected_tool_use_id: str | None = None
+        self._selected_flow_vid: str | None = None
         self._layout: LayoutResult = self._compute_layout()
         self._canvas: Static | None = None
         self._updating = False
@@ -137,6 +138,7 @@ class FlowchartPanel(ScrollableContainer):
         self._graph = CallGraph()
         self._virtual_to_tid = {}
         self._selected_tool_use_id = None
+        self._selected_flow_vid = None
         self._layout = self._compute_layout()
         self._refresh_canvas()
 
@@ -260,52 +262,44 @@ class FlowchartPanel(ScrollableContainer):
         return sub
 
     def _flow_subgraph(self) -> CallGraph:
-        """Build a temporal execution DAG from all recorded Instances.
+        """Build a temporal execution DAG from session-persistent FlowRecords.
 
         Each invocation becomes its own Node. Temporal edges connect
         each node to the most recently completed predecessor -- the
         latest node whose ended_ts <= this node's started_ts. This
         naturally produces forks for parallel spawns and joins for
         sequential continuations.
-        """
-        from ..graph_model import Instance
 
+        Unlike the old Instance-based approach, FlowRecords survive
+        user_message flushes so the full session history is preserved.
+        """
         sub = CallGraph()
 
-        all_instances: list[tuple[float, str, str, Instance, Node]] = []
-        for nid, node in self._graph.nodes.items():
-            if nid == ROOT_ID:
-                continue
-            for tid, inst in node._instances.items():
-                all_instances.append((inst.started_ts, nid, tid, inst, node))
-
-        all_instances.sort(key=lambda x: x[0])
-
-        if not all_instances:
+        history = self._graph._flow_history
+        if not history:
             return sub
 
         # Track completed nodes in chronological order of their end time.
         # Each entry: (ended_ts, vid). Kept sorted by ended_ts.
         completed: list[tuple[float, str]] = []
 
-        for i, (ts, nid, tid, inst, node) in enumerate(all_instances):
-            vid = f"{nid}@{i}"
-            flow_label = inst.description if inst.description else node.label
+        for i, rec in enumerate(history):
+            vid = f"{rec.node_id}@{i}"
+            flow_label = rec.description if rec.description else rec.label
             sub.nodes[vid] = Node(
                 id=vid,
                 label=flow_label,
-                node_type=node.node_type,
-                status=inst.status,
+                node_type=rec.node_type,
+                status=rec.status,
                 call_count=1,
-                last_ts=inst.started_ts,
-                tool_breakdown=dict(inst.tool_breakdown),
+                last_ts=rec.started_ts,
             )
 
             # Find parent: the most recently COMPLETED node whose
             # end time is <= this node's start time.
             parent = ROOT_ID
             for end_ts, completed_vid in reversed(completed):
-                if end_ts <= ts:
+                if end_ts <= rec.started_ts:
                     parent = completed_vid
                     break
 
@@ -313,11 +307,9 @@ class FlowchartPanel(ScrollableContainer):
                 parent_id=parent, child_id=vid, count=1,
             )
 
-            # If this instance has completed, add it to the completed list.
-            if inst.ended_ts is not None:
-                # Insert maintaining sorted order by end_ts.
-                # For small N (< 500) a simple append + sort is fine.
-                completed.append((inst.ended_ts, vid))
+            # If this record has completed, add it to the completed list.
+            if rec.ended_ts is not None:
+                completed.append((rec.ended_ts, vid))
                 completed.sort(key=lambda x: x[0])
 
         return sub
@@ -399,7 +391,9 @@ class FlowchartPanel(ScrollableContainer):
             # which one they clicked. Selection coming from the
             # timeline (no tid recorded) still falls back to base-id
             # matching so every relevant instance lights up.
-            if selected_tid is not None and "#" in nid:
+            if self._selected_flow_vid is not None and "@" in nid:
+                highlight = nid == self._selected_flow_vid
+            elif selected_tid is not None and "#" in nid:
                 highlight = self._virtual_to_tid.get(nid) == selected_tid
             else:
                 highlight = base_match
@@ -536,6 +530,15 @@ class FlowchartPanel(ScrollableContainer):
                     # even when multiple parallel instances share a base
                     # node id. None for non-virtual hits.
                     self._selected_tool_use_id = self._virtual_to_tid.get(nid)
+                    # For flow mode: remember exact virtual id so only
+                    # the clicked node highlights, not all nodes sharing
+                    # the same base id.
+                    if "@" in nid:
+                        self._selected_flow_vid = nid
+                    elif "#" in nid:
+                        self._selected_flow_vid = None
+                    else:
+                        self._selected_flow_vid = None
                 except Exception:
                     pass
                 finally:

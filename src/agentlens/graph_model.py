@@ -105,6 +105,26 @@ def _is_real_user_prompt(ev: HarnessEvent) -> bool:
 
 
 @dataclass
+class FlowRecord:
+    """Permanent record of a single agent invocation for flow mode.
+
+    Unlike Instance (which is turn-scoped and cleared on flush),
+    FlowRecord lives for the entire session and is only cleared on
+    session switch (clear()). This lets flow mode show the full
+    execution history.
+    """
+
+    node_id: str  # base node id (e.g. "agent:executor")
+    tool_use_id: str
+    label: str  # display label (from _display_label)
+    description: str  # Agent call description
+    node_type: NodeType
+    started_ts: float
+    ended_ts: float | None = None
+    status: NodeStatus = "running"
+
+
+@dataclass
 class Instance:
     """A single live spawn of an agent node.
 
@@ -176,6 +196,11 @@ class CallGraph:
     # user_message event clears the set, so the user has time to observe
     # fast agents before they flip to done on screen.
     _current_turn: set[str] = field(default_factory=set)
+    # Session-persistent flow history. NOT cleared on user_message flush;
+    # only cleared on clear() (session switch). Lets flow mode show the
+    # full execution history across all turns.
+    _flow_history: list["FlowRecord"] = field(default_factory=list)
+    _flow_tid_to_index: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if ROOT_ID not in self.nodes:
@@ -336,16 +361,30 @@ class CallGraph:
             # Record a per-spawn Instance so running-mode can show one
             # box per live invocation. Only top-level agent spawns get
             # instances in Phase 1; nested spawns stay aggregated.
+            desc = inp.get("description", "")
+            if not isinstance(desc, str):
+                desc = ""
+            desc = desc[:MAX_LABEL_LEN]
             if ntype == "agent":
-                desc = inp.get("description", "")
-                if not isinstance(desc, str):
-                    desc = ""
                 self.nodes[child_id]._instances[tid] = Instance(
                     tool_use_id=tid,
                     status="running",
                     started_ts=ts_epoch,
-                    description=desc[:MAX_LABEL_LEN],
+                    description=desc,
                 )
+            # Append a session-persistent FlowRecord for flow mode.
+            # Cap at MAX_NODES to bound memory.
+            if len(self._flow_history) <= MAX_NODES:
+                rec = FlowRecord(
+                    node_id=child_id,
+                    tool_use_id=tid,
+                    label=label,
+                    description=desc,
+                    node_type=ntype,
+                    started_ts=ts_epoch,
+                )
+                self._flow_history.append(rec)
+                self._flow_tid_to_index[tid] = len(self._flow_history) - 1
 
         return changed
 
@@ -397,6 +436,15 @@ class CallGraph:
             changed = True
             if linked and instance.subagent_uuid != linked:
                 instance.subagent_uuid = linked
+                changed = True
+        # Update the matching session-persistent FlowRecord.
+        flow_idx = self._flow_tid_to_index.get(tid)
+        if flow_idx is not None and flow_idx < len(self._flow_history):
+            rec = self._flow_history[flow_idx]
+            if rec.ended_ts is None:
+                ts_epoch_flow = ev.ts.timestamp() if ev.ts is not None else 0.0
+                rec.ended_ts = ts_epoch_flow
+                rec.status = new_status
                 changed = True
         return changed
 
