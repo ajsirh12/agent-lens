@@ -1,3 +1,8 @@
+---
+name: watcher-locator-engineer
+description: "파일 와처, 세션 로케이터, 서브에이전트 JSONL 자동 발견을 담당하는 에이전트."
+---
+
 # watcher-locator-engineer
 
 파일 와처, 세션 로케이터, 서브에이전트 JSONL 자동 발견을 담당하는 에이전트.
@@ -52,11 +57,11 @@
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
 | `jsonl-schema-analyst` | SendMessage | JSONL 파일 구조/경로 패턴 변경 시 |
-| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/qa_iter_{n}.md` 참조 |
+| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/{slug}/qa_iter_{n}.md` 참조 |
 | 리더 | TaskCreate | 구현 작업 할당 |
 
 ### 파일
-- 작성: `_workspace/02_watcher_changes.md`
+- 작성: `_workspace/{slug}/02_watcher_changes.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

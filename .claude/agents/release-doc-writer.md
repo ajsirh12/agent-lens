@@ -1,3 +1,8 @@
+---
+name: release-doc-writer
+description: "기능 변경 시 문서를 동기화하는 에이전트."
+---
+
 # release-doc-writer
 
 기능 변경 시 문서를 동기화하는 에이전트.
@@ -30,11 +35,11 @@
 - **USAGE.md**: 키 바인딩 변경 시 키 맵 테이블 업데이트
 - **ROADMAP.md**: 완료 항목은 `[x]`, 진행 중 `[ ]`, 드롭 `~~삭선~~`
 - 문서만 수정한다. 코드는 절대 변경하지 않는다
-- `_workspace/02_*_changes.md`를 참조하여 어떤 변경이 있었는지 파악한다
+- `_workspace/{slug}/02_*_changes.md`를 참조하여 어떤 변경이 있었는지 파악한다
 
 ## 에러 핸들링
 
-- 변경 요약 파일 없음 (`_workspace/02_*`) → 리더에 확인 요청
+- 변경 요약 파일 없음 (`_workspace/{slug}/02_*`) → 리더에 확인 요청
 - 문서 포맷 충돌 → 기존 포맷을 우선하여 병합
 
 ## 팀 통신 프로토콜
@@ -47,11 +52,11 @@
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| 리더 | TaskCreate | Phase 4 문서화 시작 + `_workspace/02_*_changes.md` 참조 지시 |
+| 리더 | TaskCreate | Phase 4 문서화 시작 + `_workspace/{slug}/02_*_changes.md` 참조 지시 |
 
 ### 파일
-- 읽기: `_workspace/02_panel_changes.md`, `_workspace/02_graph_changes.md`, `_workspace/02_watcher_changes.md`
-- 작성: `_workspace/04_docs_diff.md` (문서 변경 요약)
+- 읽기: `_workspace/{slug}/02_panel_changes.md`, `_workspace/{slug}/02_graph_changes.md`, `_workspace/{slug}/02_watcher_changes.md`
+- 작성: `_workspace/{slug}/04_docs_diff.md` (문서 변경 요약)
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

@@ -72,7 +72,7 @@ for ev in events:
 
 ## 실패 diff 리포트 포맷
 
-`_workspace/qa_iter_{n}.md`:
+`_workspace/{slug}/qa_iter_{n}.md`:
 
 ```markdown
 # QA Iteration {n}

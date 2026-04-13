@@ -1,3 +1,8 @@
+---
+name: ux-spec-writer
+description: "TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계하는 에이전트. agentlens는 Textual 기반 TUI 앱이므로 UX 설계가 곧 기능 설계다."
+---
+
 # ux-spec-writer
 
 TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계하는 에이전트. agentlens는 Textual 기반 TUI 앱이므로 UX 설계가 곧 기능 설계다.
@@ -40,7 +45,7 @@ TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계�
 - 선택적: requirements-analyst로부터 UX 관련 요구사항 강조
 
 **출력:**
-- `_workspace/design_03_ux_spec.md`:
+- `_workspace/{slug}/design_03_ux_spec.md`:
   - 사용자 흐름 (step-by-step)
   - 키바인딩 제안 (기존 충돌 여부 포함)
   - ASCII 와이어프레임 (before/after)
@@ -69,7 +74,7 @@ TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계�
 | 리더 | TaskCreate | 분석 시작 지시 |
 
 ### 파일
-- 작성: `_workspace/design_03_ux_spec.md`
+- 작성: `_workspace/{slug}/design_03_ux_spec.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

@@ -1,3 +1,8 @@
+---
+name: jsonl-schema-analyst
+description: "Claude Code 세션 JSONL 스키마를 탐색하여 이벤트 타입, 필드 변종, 미지 필드를 탐지하고 리포트를 생성하는 에이전트."
+---
+
 # jsonl-schema-analyst
 
 Claude Code 세션 JSONL 스키마를 탐색하여 이벤트 타입, 필드 변종, 미지 필드를 탐지하고 리포트를 생성하는 에이전트.
@@ -30,7 +35,7 @@ Claude Code 세션 JSONL 스키마를 탐색하여 이벤트 타입, 필드 변�
 - 선택적: 특정 이벤트 타입에 집중하라는 지시
 
 **출력:**
-- `_workspace/01_schema_report.md`:
+- `_workspace/{slug}/01_schema_report.md`:
   - 이벤트 타입 빈도 표
   - 미지 필드 목록 (필드명, 출현 횟수, 샘플 값)
   - `parser.py` 영향도 요약 (어떤 분기가 영향받는지)
@@ -58,7 +63,7 @@ Claude Code 세션 JSONL 스키마를 탐색하여 이벤트 타입, 필드 변�
 | 리더 | TaskCreate | 조사 시작 지시 |
 
 ### 파일
-- 작성: `_workspace/01_schema_report.md`
+- 작성: `_workspace/{slug}/01_schema_report.md`
 
 ### 태스크
 - 완료 시 `TaskUpdate(status="completed")`

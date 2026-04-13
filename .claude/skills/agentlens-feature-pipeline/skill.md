@@ -7,6 +7,16 @@ description: "agentlens에 새 기능 추가, 버그 수정, 리팩토링 작업
 
 agentlens 에이전트 팀을 조율하여 조사→구현→검증→문서화 파이프라인을 실행한다.
 
+## Phase 0: Slug 생성
+
+파이프라인 시작 시 작업 요청에서 slug를 생성한다. 이후 모든 산출물은 `_workspace/{slug}/` 하위에 저장한다.
+
+**slug 규칙:**
+- 작업 요청의 핵심 키워드를 kebab-case로 변환 (예: "Timeline cross-highlight" → `timeline-cross-highlight`)
+- 영문 소문자 + 하이픈만 사용, 최대 30자
+- 동일 slug가 이미 존재하면 숫자 접미사 추가 (`timeline-cross-highlight-2`)
+- design-pipeline에서 핸드오프된 경우 동일 slug를 이어받는다
+
 ## 팀 구성
 
 ```
@@ -26,7 +36,7 @@ TeamCreate:
 
 ### Phase 1: 조사 (jsonl-schema-analyst, haiku)
 
-스키마 탐색 → `_workspace/01_schema_report.md` 생성.
+스키마 탐색 → `_workspace/{slug}/01_schema_report.md` 생성.
 
 **스킵 조건:**
 - UI만 수정 (CSS, 키바인딩): Phase 1 + 1.5 스킵
@@ -39,12 +49,12 @@ TeamCreate:
 - **1회 리뷰, 루프 없음**
 - 불일치 발견 → analyst에 SendMessage (수정 요청 1회)
 - 불일치 3개+ → 리더에 analyst 승격 요청 (haiku → sonnet)
-- 출력: `_workspace/01_5_schema_review.md`
+- 출력: `_workspace/{slug}/01_5_schema_review.md`
 - Phase 1 실행 시에만 동작
 
 ### Phase 2: 구현 (병렬, sonnet/opus/sonnet)
 
-3인 병렬 실행. 각자 `_workspace/02_{agent}_changes.md` 작성.
+3인 병렬 실행. 각자 `_workspace/{slug}/02_{agent}_changes.md` 작성.
 
 | 에이전트 | 기본 모델 | 담당 |
 |----------|----------|------|
@@ -82,7 +92,7 @@ iter 3:
   - 마지막 시도
 
 iter > 3:
-  - _workspace/escalation.md 작성
+  - _workspace/{slug}/escalation.md 작성
     - 3회 전체 실패 diff 요약
     - 수정 시도 내역
     - 의심 가설
@@ -95,7 +105,7 @@ iter > 3:
 
 ### Phase 4: 문서화 (release-doc-writer, haiku)
 
-QA 통과 후 실행. `_workspace/02_*_changes.md` 참조하여 문서 4종 갱신.
+QA 통과 후 실행. `_workspace/{slug}/02_*_changes.md` 참조하여 문서 4종 갱신.
 
 ## 작업 의존성 DAG
 
@@ -125,11 +135,11 @@ task_08_docs                  (doc-writer)    → deps: [task_07 통과]
 |------|------|
 | SendMessage | 빠른 요청/응답 (1~3줄 + 파일 참조) |
 | TaskCreate/TaskUpdate | 진행상황, 의존성, iter 카운터 |
-| _workspace/ 파일 | 구조화된 산출물, diff, 리포트 |
+| _workspace/{slug}/ 파일 | 구조화된 산출물, diff, 리포트 |
 
 파일 경로 규약:
 ```
-.claude/_workspace/
+.claude/_workspace/{slug}/
 ├── 01_schema_report.md
 ├── 01_5_schema_review.md
 ├── 02_panel_changes.md

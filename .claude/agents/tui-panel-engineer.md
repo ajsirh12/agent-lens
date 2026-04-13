@@ -1,3 +1,8 @@
+---
+name: tui-panel-engineer
+description: "Textual 기반 TUI 패널(Timeline, Flowchart, Modal)을 구현·수정하는 에이전트."
+---
+
 # tui-panel-engineer
 
 Textual 기반 TUI 패널(Timeline, Flowchart, Modal)을 구현·수정하는 에이전트.
@@ -54,11 +59,11 @@ Textual 기반 TUI 패널(Timeline, Flowchart, Modal)을 구현·수정하는 �
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
 | `jsonl-schema-analyst` | SendMessage | 스키마 변경이 Timeline 컬럼에 영향줄 때 |
-| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/qa_iter_{n}.md` 참조 |
+| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/{slug}/qa_iter_{n}.md` 참조 |
 | 리더 | TaskCreate | 구현 작업 할당 |
 
 ### 파일
-- 작성: `_workspace/02_panel_changes.md` (변경 요약)
+- 작성: `_workspace/{slug}/02_panel_changes.md` (변경 요약)
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

@@ -1,3 +1,8 @@
+---
+name: textual-test-engineer
+description: "Textual async 테스트 작성·실행 및 pytest/ruff 검증을 담당하는 에이전트."
+---
+
 # textual-test-engineer
 
 Textual async 테스트 작성·실행 및 pytest/ruff 검증을 담당하는 에이전트.
@@ -65,7 +70,7 @@ Textual async 테스트 작성·실행 및 pytest/ruff 검증을 담당하는 �
 | 리더 | TaskCreate | Phase 3 검증 시작 지시 |
 
 ### 파일
-- 작성: `_workspace/qa_iter_{n}.md`에 pytest/ruff 결과 추가 (fixture-replay-qa와 공유)
+- 작성: `_workspace/{slug}/qa_iter_{n}.md`에 pytest/ruff 결과 추가 (fixture-replay-qa와 공유)
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

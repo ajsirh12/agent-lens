@@ -7,6 +7,15 @@ description: "자연어 기능 요청을 구조화된 설계 문서로 변환하
 
 자연어 기능 요청을 받아 3인 병렬 분석 → 1인 종합으로 설계 문서를 생성한다.
 
+## Phase 0: Slug 생성
+
+파이프라인 시작 시 기능 요청에서 slug를 생성한다. 이후 모든 산출물은 `_workspace/{slug}/` 하위에 저장한다.
+
+**slug 규칙:**
+- 기능 요청의 핵심 키워드를 kebab-case로 변환 (예: "Timeline 필터링" → `timeline-filter`)
+- 영문 소문자 + 하이픈만 사용, 최대 30자
+- 동일 slug가 이미 존재하면 숫자 접미사 추가 (`timeline-filter-2`)
+
 ## 팀 구성
 
 ```
@@ -31,7 +40,7 @@ TaskCreate:
     assignee: requirements-analyst
     description: |
       사용자 요청: "{원문}"
-      _workspace/design_01_requirements.md 생성.
+      _workspace/{slug}/design_01_requirements.md 생성.
       스킬 requirements-extraction 참조.
     deps: []
 
@@ -39,7 +48,7 @@ TaskCreate:
     assignee: impact-analyst
     description: |
       사용자 요청: "{원문}"
-      _workspace/design_02_impact.md 생성.
+      _workspace/{slug}/design_02_impact.md 생성.
       스킬 impact-analysis 참조.
     deps: []
 
@@ -47,7 +56,7 @@ TaskCreate:
     assignee: ux-spec-writer
     description: |
       사용자 요청: "{원문}"
-      _workspace/design_03_ux_spec.md 생성.
+      _workspace/{slug}/design_03_ux_spec.md 생성.
       스킬 tui-ux-spec 참조.
     deps: []
 ```
@@ -68,10 +77,10 @@ TaskCreate:
   - task: "설계 종합"
     assignee: design-synthesizer
     description: |
-      _workspace/design_01_requirements.md
-      _workspace/design_02_impact.md
-      _workspace/design_03_ux_spec.md
-      세 파일을 종합하여 _workspace/design_spec.md 생성.
+      _workspace/{slug}/design_01_requirements.md
+      _workspace/{slug}/design_02_impact.md
+      _workspace/{slug}/design_03_ux_spec.md
+      세 파일을 종합하여 _workspace/{slug}/design_spec.md 생성.
     deps: [task_01, task_02, task_03]
 ```
 
@@ -99,11 +108,11 @@ task_05_user_review   (leader)                → deps: [04]
 |------|------|
 | SendMessage | 팀원 간 힌트 교환 (실시간, 1~3줄) |
 | TaskCreate/TaskUpdate | 진행상황, 의존성 관리 |
-| _workspace/ 파일 | 구조화된 산출물 |
+| _workspace/{slug}/ 파일 | 구조화된 산출물 |
 
 파일 경로 규약:
 ```
-.claude/_workspace/
+.claude/_workspace/{slug}/
 ├── design_01_requirements.md   (requirements-analyst)
 ├── design_02_impact.md         (impact-analyst)
 ├── design_03_ux_spec.md        (ux-spec-writer)
@@ -114,7 +123,7 @@ task_05_user_review   (leader)                → deps: [04]
 
 설계 완료 후 `agentlens-feature-pipeline`으로 핸드오프한다:
 
-1. `design_spec.md`를 `_workspace/`에 보존한다
+1. `design_spec.md`를 `_workspace/{slug}/`에 보존한다
 2. feature-pipeline의 Phase 1(스키마 조사)은 design_spec.md의 영향 분석을 참조하여 조사 범위를 좁힌다
 3. Phase 2(구현)의 각 에이전트는 design_spec.md의 구현 가이드를 따른다
 

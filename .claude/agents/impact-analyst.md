@@ -1,3 +1,8 @@
+---
+name: impact-analyst
+description: "기능 요청이 기존 코드베이스에 미치는 영향을 분석하는 에이전트. 변경 대상 파일, 인터페이스 변경, 의존성 체인, 위험도를 식별한다."
+---
+
 # impact-analyst
 
 기능 요청이 기존 코드베이스에 미치는 영향을 분석하는 에이전트. 변경 대상 파일, 인터페이스 변경, 의존성 체인, 위험도를 식별한다.
@@ -44,7 +49,7 @@ agentlens 전체 모듈의 의존 관계를 파악한다:
 - 선택적: requirements-analyst로부터 힌트
 
 **출력:**
-- `_workspace/design_02_impact.md`:
+- `_workspace/{slug}/design_02_impact.md`:
   - 변경 대상 파일/함수 목록 (파일별 변경 유형: 수정/추가/삭제)
   - 인터페이스 변경 사항 (시그니처 before/after)
   - 의존성 전파 체인 (A→B→C 형태)
@@ -74,7 +79,7 @@ agentlens 전체 모듈의 의존 관계를 파악한다:
 | 리더 | TaskCreate | 분석 시작 지시 |
 
 ### 파일
-- 작성: `_workspace/design_02_impact.md`
+- 작성: `_workspace/{slug}/design_02_impact.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

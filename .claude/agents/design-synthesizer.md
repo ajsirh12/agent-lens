@@ -1,3 +1,8 @@
+---
+name: design-synthesizer
+description: "3인의 분석 산출물(요구사항, 영향 분석, UX 스펙)을 종합하여 최종 설계 문서를 생성하는 에이전트."
+---
+
 # design-synthesizer
 
 3인의 분석 산출물(요구사항, 영향 분석, UX 스펙)을 종합하여 최종 설계 문서를 생성하는 에이전트.
@@ -29,13 +34,13 @@
 ## 입력/출력 프로토콜
 
 **입력:**
-- `_workspace/design_01_requirements.md` (requirements-analyst)
-- `_workspace/design_02_impact.md` (impact-analyst)
-- `_workspace/design_03_ux_spec.md` (ux-spec-writer)
+- `_workspace/{slug}/design_01_requirements.md` (requirements-analyst)
+- `_workspace/{slug}/design_02_impact.md` (impact-analyst)
+- `_workspace/{slug}/design_03_ux_spec.md` (ux-spec-writer)
 - 선택적: impact-analyst로부터 조기 공유된 위험 항목
 
 **출력:**
-- `_workspace/design_spec.md`:
+- `_workspace/{slug}/design_spec.md`:
   - 기능 요약
   - 요구사항 (AC 포함)
   - 영향 분석 요약
@@ -65,8 +70,8 @@
 | 리더 | TaskCreate | 종합 시작 지시 |
 
 ### 파일
-- 읽기: `_workspace/design_01_requirements.md`, `design_02_impact.md`, `design_03_ux_spec.md`
-- 작성: `_workspace/design_spec.md`
+- 읽기: `_workspace/{slug}/design_01_requirements.md`, `design_02_impact.md`, `design_03_ux_spec.md`
+- 작성: `_workspace/{slug}/design_spec.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

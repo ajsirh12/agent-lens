@@ -1,3 +1,8 @@
+---
+name: fixture-replay-qa
+description: "실제 JSONL fixture를 기반으로 parser→graph_model→panel 경계면을 교차 비교하는 QA 에이전트."
+---
+
 # fixture-replay-qa
 
 실제 JSONL fixture를 기반으로 parser→graph_model→panel 경계면을 교차 비교하는 QA 에이전트.
@@ -14,12 +19,12 @@
 
 ### Phase 1.5: 스키마 리포트 교차 검증
 
-- `_workspace/01_schema_report.md`의 이벤트 타입/필드를 `tests/fixtures/` 실제 데이터와 교차 비교한다
+- `_workspace/{slug}/01_schema_report.md`의 이벤트 타입/필드를 `tests/fixtures/` 실제 데이터와 교차 비교한다
 - fixture에 있지만 리포트에서 빠진 필드를 탐지한다
 - 리포트에 있지만 fixture에서 확인 불가한 항목은 "미검증" 태그를 붙인다
 - **1회 리뷰, 루프 없음**. 불일치 시 analyst에 수정 요청 1회, 응답 후 Phase 2 진행
 - 불일치 3개 이상 → 리더에게 analyst 모델 승격 요청 (haiku → sonnet)
-- 출력: `_workspace/01_5_schema_review.md`
+- 출력: `_workspace/{slug}/01_5_schema_review.md`
 
 ### Phase 3: 경계면 QA
 
@@ -57,7 +62,7 @@
 | `graph-model-engineer` | SendMessage + 파일 | Phase 3 실패 시 수정 요청 |
 | `watcher-locator-engineer` | SendMessage + 파일 | Phase 3 실패 시 수정 요청 |
 | 리더 | SendMessage | Phase 1.5 불일치 3개+ 시 analyst 승격 요청 |
-| 리더 | SendMessage + 파일 | 3회 실패 시 에스컬레이션 (`_workspace/escalation.md`) |
+| 리더 | SendMessage + 파일 | 3회 실패 시 에스컬레이션 (`_workspace/{slug}/escalation.md`) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
@@ -68,9 +73,9 @@
 | 리더 | TaskCreate | Phase 1.5 또는 Phase 3 검증 시작 지시 |
 
 ### 파일
-- 작성: `_workspace/01_5_schema_review.md` (Phase 1.5)
-- 작성: `_workspace/qa_iter_{n}.md` (Phase 3, iter별)
-- 작성: `_workspace/escalation.md` (3회 초과 시, 리더와 공동)
+- 작성: `_workspace/{slug}/01_5_schema_review.md` (Phase 1.5)
+- 작성: `_workspace/{slug}/qa_iter_{n}.md` (Phase 3, iter별)
+- 작성: `_workspace/{slug}/escalation.md` (3회 초과 시, 리더와 공동)
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

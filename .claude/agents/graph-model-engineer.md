@@ -1,3 +1,8 @@
+---
+name: graph-model-engineer
+description: "그래프 모델(노드/엣지), 중첩 서브에이전트 트리, 인스턴스 집계 로직을 담당하는 에이전트."
+---
+
 # graph-model-engineer
 
 그래프 모델(노드/엣지), 중첩 서브에이전트 트리, 인스턴스 집계 로직을 담당하는 에이전트.
@@ -59,11 +64,11 @@
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
 | `jsonl-schema-analyst` | SendMessage | 새 tool name/subagent spawn 패턴 알림 |
-| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/qa_iter_{n}.md` 참조 |
+| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/{slug}/qa_iter_{n}.md` 참조 |
 | 리더 | TaskCreate | 구현 작업 할당 |
 
 ### 파일
-- 작성: `_workspace/02_graph_changes.md`
+- 작성: `_workspace/{slug}/02_graph_changes.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

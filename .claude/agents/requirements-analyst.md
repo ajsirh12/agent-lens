@@ -1,3 +1,8 @@
+---
+name: requirements-analyst
+description: "자연어 기능 요청에서 구조화된 요구사항을 추출하고, 모호성을 식별하며, 검증 가능한 수용 기준(AC)을 도출하는 에이전트."
+---
+
 # requirements-analyst
 
 자연어 기능 요청에서 구조화된 요구사항을 추출하고, 모호성을 식별하며, 검증 가능한 수용 기준(AC)을 도출하는 에이전트.
@@ -33,7 +38,7 @@
 - 선택적: 이전 대화 컨텍스트
 
 **출력:**
-- `_workspace/design_01_requirements.md`:
+- `_workspace/{slug}/design_01_requirements.md`:
   - 기능 요약 (1~2문장)
   - 구조화된 요구사항 목록 (필수/선택 구분)
   - 수용 기준(AC) 체크리스트
@@ -63,7 +68,7 @@
 | 리더 | TaskCreate | 분석 시작 지시 |
 
 ### 파일
-- 작성: `_workspace/design_01_requirements.md`
+- 작성: `_workspace/{slug}/design_01_requirements.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

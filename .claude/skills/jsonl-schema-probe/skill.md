@@ -12,7 +12,7 @@ Claude Code 세션 JSONL 파일을 분석하여 이벤트 타입·필드 빈도�
 1. **대상 파일 선정**: 지정된 JSONL 경로 또는 `~/.claude/projects/` 하위 최신 파일
 2. **probe 스크립트 실행**: `scripts/probe.py`를 실행하여 빈도표 생성
 3. **기존 스키마와 비교**: `docs/jsonl-schema-observed.md`와 diff
-4. **리포트 작성**: `_workspace/01_schema_report.md`
+4. **리포트 작성**: `_workspace/{slug}/01_schema_report.md`
 
 ## 스크립트 사용법
 
