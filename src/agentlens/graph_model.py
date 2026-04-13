@@ -117,6 +117,7 @@ class Instance:
     status: NodeStatus = "running"
     started_ts: float = 0.0
     ended_ts: float | None = None
+    description: str = ""
     subagent_uuid: str | None = None
     # Per-instance tool-call counts (Phase 2a). Mirrors the node-level
     # ``tool_breakdown`` aggregate but scoped to a single spawn so the
@@ -336,10 +337,14 @@ class CallGraph:
             # box per live invocation. Only top-level agent spawns get
             # instances in Phase 1; nested spawns stay aggregated.
             if ntype == "agent":
+                desc = inp.get("description", "")
+                if not isinstance(desc, str):
+                    desc = ""
                 self.nodes[child_id]._instances[tid] = Instance(
                     tool_use_id=tid,
                     status="running",
                     started_ts=ts_epoch,
+                    description=desc[:MAX_LABEL_LEN],
                 )
 
         return changed

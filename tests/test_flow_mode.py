@@ -9,13 +9,19 @@ import pytest
 
 from agentlens.app import AgentlensApp
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import ROOT_ID, CallGraph, Instance, Node
+from agentlens.graph_model import ROOT_ID, CallGraph, Edge, Instance, Node
 from agentlens.panels.flowchart import FlowchartPanel
 
 
 def _agent_use(
-    subagent: str, *, tid: str = "t1"
+    subagent: str,
+    *,
+    tid: str = "t1",
+    description: str = "",
 ) -> HarnessEvent:
+    inp: dict = {"subagent_type": subagent}
+    if description:
+        inp["description"] = description
     return HarnessEvent(
         type=EventType.tool_use,
         ts=datetime.now(timezone.utc),
@@ -23,7 +29,7 @@ def _agent_use(
         payload={
             "tool_name": "Agent",
             "tool_use_id": tid,
-            "input": {"subagent_type": subagent},
+            "input": inp,
         },
     )
 
@@ -86,10 +92,22 @@ def test_flow_subgraph_creates_per_invocation_nodes() -> None:
     panel = FlowchartPanel()
     g = panel._graph
 
-    # Three sequential agent spawns (only agents create instances).
+    # Three sequential agent spawns that complete before the next starts.
     g.update_from_event(_agent_use("planner", tid="t1"))
+    g.update_from_event(_result("t1"))
     g.update_from_event(_agent_use("architect", tid="t2"))
+    g.update_from_event(_result("t2"))
     g.update_from_event(_agent_use("critic", tid="t3"))
+
+    # Manually set timestamps to enforce sequential ordering.
+    inst1 = g.nodes["agent:planner"]._instances["t1"]
+    inst1.started_ts = 0.0
+    inst1.ended_ts = 5.0
+    inst2 = g.nodes["agent:architect"]._instances["t2"]
+    inst2.started_ts = 6.0
+    inst2.ended_ts = 10.0
+    inst3 = g.nodes["agent:critic"]._instances["t3"]
+    inst3.started_ts = 11.0
 
     sub = panel._flow_subgraph()
 
@@ -104,7 +122,6 @@ def test_flow_subgraph_creates_per_invocation_nodes() -> None:
     flow_ids = [nid for nid in sub.nodes if nid != ROOT_ID]
     assert len(flow_ids) == 3
     # Edges should form root -> first -> second -> third.
-    edge_parents = {cid: pid for (pid, cid) in sub.edges}
     # Starting from root, walk the chain.
     cur = ROOT_ID
     visited = []
@@ -186,3 +203,132 @@ def test_base_node_id_strips_both_hash_and_at() -> None:
     assert FlowchartPanel._base_node_id("skill:critic") == "skill:critic"
     assert FlowchartPanel._base_node_id(None) is None
     assert FlowchartPanel._base_node_id("") == ""
+
+
+# -------------------------------------------------------------------
+# 7. Flow node uses instance description as label
+# -------------------------------------------------------------------
+def test_flow_node_uses_instance_description_as_label() -> None:
+    panel = FlowchartPanel()
+    g = panel._graph
+
+    g.update_from_event(_agent_use("explore", tid="t1", description="Schema probe"))
+    g.update_from_event(_agent_use("explore", tid="t2", description="Code review"))
+
+    sub = panel._flow_subgraph()
+
+    flow_labels = [n.label for nid, n in sub.nodes.items() if nid != ROOT_ID]
+    assert "Schema probe" in flow_labels
+    assert "Code review" in flow_labels
+    # The generic type name should NOT appear as a label.
+    assert "explore" not in flow_labels
+
+
+# -------------------------------------------------------------------
+# 8. Flow node falls back to type when no description
+# -------------------------------------------------------------------
+def test_flow_node_falls_back_to_type_when_no_description() -> None:
+    panel = FlowchartPanel()
+    g = panel._graph
+
+    g.update_from_event(_agent_use("planner", tid="t1"))
+
+    sub = panel._flow_subgraph()
+
+    flow_labels = [n.label for nid, n in sub.nodes.items() if nid != ROOT_ID]
+    assert flow_labels == ["planner"]
+
+
+# -------------------------------------------------------------------
+# 9. Parallel spawns fork from same parent
+# -------------------------------------------------------------------
+def test_flow_parallel_spawns_fork_from_same_parent() -> None:
+    """Instances B and C start before A ends -- they should both
+    connect to ROOT (nothing completed before ts=1)."""
+    panel = FlowchartPanel()
+    g = panel._graph
+
+    # Create three agent types so each gets its own node + instance.
+    g.update_from_event(_agent_use("alpha", tid="tA"))
+    g.update_from_event(_agent_use("beta", tid="tB"))
+    g.update_from_event(_agent_use("gamma", tid="tC"))
+
+    # Manually set timestamps to simulate parallel execution.
+    inst_a = g.nodes["agent:alpha"]._instances["tA"]
+    inst_a.started_ts = 0.0
+    inst_a.ended_ts = 10.0
+    inst_a.status = "done"
+
+    inst_b = g.nodes["agent:beta"]._instances["tB"]
+    inst_b.started_ts = 1.0
+    inst_b.ended_ts = 8.0
+    inst_b.status = "done"
+
+    inst_c = g.nodes["agent:gamma"]._instances["tC"]
+    inst_c.started_ts = 1.0
+    inst_c.ended_ts = 12.0
+    inst_c.status = "done"
+
+    sub = panel._flow_subgraph()
+
+    # Build parent map: child_vid -> parent_vid
+    parent_of = {cid: pid for (pid, cid) in sub.edges}
+
+    # Find the vids for each instance (sorted by started_ts: A=0, B=1, C=1)
+    flow_ids = sorted(
+        [nid for nid in sub.nodes if nid != ROOT_ID],
+        key=lambda nid: sub.nodes[nid].last_ts,
+    )
+    assert len(flow_ids) == 3
+    vid_a, vid_b, vid_c = flow_ids[0], flow_ids[1], flow_ids[2]
+
+    # A connects to ROOT (nothing completed before ts=0).
+    assert parent_of[vid_a] == ROOT_ID
+    # B and C start at ts=1; nothing has completed by then (A ends at 10).
+    assert parent_of[vid_b] == ROOT_ID
+    assert parent_of[vid_c] == ROOT_ID
+
+
+# -------------------------------------------------------------------
+# 10. Sequential after parallel joins to last completed
+# -------------------------------------------------------------------
+def test_flow_sequential_after_parallel_joins() -> None:
+    """C starts after both A and B end. C's parent should be B
+    (the last to complete before C started)."""
+    panel = FlowchartPanel()
+    g = panel._graph
+
+    g.update_from_event(_agent_use("alpha", tid="tA"))
+    g.update_from_event(_agent_use("beta", tid="tB"))
+    g.update_from_event(_agent_use("gamma", tid="tC"))
+
+    inst_a = g.nodes["agent:alpha"]._instances["tA"]
+    inst_a.started_ts = 0.0
+    inst_a.ended_ts = 5.0
+    inst_a.status = "done"
+
+    inst_b = g.nodes["agent:beta"]._instances["tB"]
+    inst_b.started_ts = 0.0
+    inst_b.ended_ts = 8.0
+    inst_b.status = "done"
+
+    inst_c = g.nodes["agent:gamma"]._instances["tC"]
+    inst_c.started_ts = 10.0
+    inst_c.ended_ts = 15.0
+    inst_c.status = "done"
+
+    sub = panel._flow_subgraph()
+
+    parent_of = {cid: pid for (pid, cid) in sub.edges}
+
+    # Find vids sorted by started_ts
+    flow_ids = sorted(
+        [nid for nid in sub.nodes if nid != ROOT_ID],
+        key=lambda nid: sub.nodes[nid].last_ts,
+    )
+    assert len(flow_ids) == 3
+    vid_a, vid_b, vid_c = flow_ids[0], flow_ids[1], flow_ids[2]
+
+    # C starts at ts=10. Both A (end=5) and B (end=8) are completed.
+    # B finished last, so C's parent should be B's vid.
+    assert parent_of[vid_c] == vid_b

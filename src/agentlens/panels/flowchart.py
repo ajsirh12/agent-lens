@@ -262,17 +262,16 @@ class FlowchartPanel(ScrollableContainer):
     def _flow_subgraph(self) -> CallGraph:
         """Build a temporal execution DAG from all recorded Instances.
 
-        Each invocation becomes its own Node keyed by
-        ``{base_node_id}@{sequence_index}``. Temporal edges connect
-        them in started_ts order as a linear chain: root -> first ->
-        second -> ... -> last. This directly reveals the execution
-        sequence.
+        Each invocation becomes its own Node. Temporal edges connect
+        each node to the most recently completed predecessor -- the
+        latest node whose ended_ts <= this node's started_ts. This
+        naturally produces forks for parallel spawns and joins for
+        sequential continuations.
         """
         from ..graph_model import Instance
 
         sub = CallGraph()
 
-        # Collect all instances across all nodes.
         all_instances: list[tuple[float, str, str, Instance, Node]] = []
         for nid, node in self._graph.nodes.items():
             if nid == ROOT_ID:
@@ -280,27 +279,46 @@ class FlowchartPanel(ScrollableContainer):
             for tid, inst in node._instances.items():
                 all_instances.append((inst.started_ts, nid, tid, inst, node))
 
-        # Sort by start timestamp. Stable sort preserves insertion
-        # order for same-ts entries (= JSONL line order).
         all_instances.sort(key=lambda x: x[0])
 
-        # Build linear chain: root -> node@0 -> node@1 -> ...
-        prev_vid = ROOT_ID
+        if not all_instances:
+            return sub
+
+        # Track completed nodes in chronological order of their end time.
+        # Each entry: (ended_ts, vid). Kept sorted by ended_ts.
+        completed: list[tuple[float, str]] = []
+
         for i, (ts, nid, tid, inst, node) in enumerate(all_instances):
             vid = f"{nid}@{i}"
+            flow_label = inst.description if inst.description else node.label
             sub.nodes[vid] = Node(
                 id=vid,
-                label=node.label,
+                label=flow_label,
                 node_type=node.node_type,
                 status=inst.status,
                 call_count=1,
                 last_ts=inst.started_ts,
                 tool_breakdown=dict(inst.tool_breakdown),
             )
-            sub.edges[(prev_vid, vid)] = Edge(
-                parent_id=prev_vid, child_id=vid, count=1,
+
+            # Find parent: the most recently COMPLETED node whose
+            # end time is <= this node's start time.
+            parent = ROOT_ID
+            for end_ts, completed_vid in reversed(completed):
+                if end_ts <= ts:
+                    parent = completed_vid
+                    break
+
+            sub.edges[(parent, vid)] = Edge(
+                parent_id=parent, child_id=vid, count=1,
             )
-            prev_vid = vid
+
+            # If this instance has completed, add it to the completed list.
+            if inst.ended_ts is not None:
+                # Insert maintaining sorted order by end_ts.
+                # For small N (< 500) a simple append + sort is fine.
+                completed.append((inst.ended_ts, vid))
+                completed.sort(key=lambda x: x[0])
 
         return sub
 
