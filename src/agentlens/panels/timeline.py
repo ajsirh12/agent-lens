@@ -77,6 +77,13 @@ class TimelinePanel(Container):
         """Public entrypoint (also used by tests) to append a row."""
         if self._table is None:
             return
+        # Skip subagent-internal events — they come from separate JSONL
+        # files (via SubagentWatcher) and arrive out of chronological
+        # order relative to the main session, breaking the timeline's
+        # time-sorted appearance. Subagent tool calls are already visible
+        # in the Flowchart breakdown badges and the drill-down modal.
+        if ev.payload.get("subagent_uuid"):
+            return
         # Capture "follow mode" BEFORE we mutate the table. If the user
         # was already looking at the bottom row (the live tail) we want
         # the new row to be the new bottom and the cursor to stick to
