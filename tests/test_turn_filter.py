@@ -112,8 +112,8 @@ def test_flow_subgraph_filters_by_turn() -> None:
 # -------------------------------------------------------------------
 # 2. Flow subgraph None returns all (backward compat)
 # -------------------------------------------------------------------
-def test_flow_subgraph_none_returns_all() -> None:
-    """When _active_turn is None, _flow_subgraph returns all records."""
+def test_flow_subgraph_live_shows_current_turn_only() -> None:
+    """LIVE flow mode shows only the current turn, not all history."""
     panel = FlowchartPanel(mode="flow")
     g = panel._graph
 
@@ -125,10 +125,11 @@ def test_flow_subgraph_none_returns_all() -> None:
     g.update_from_event(_agent_use("executor", tid="t2"))
     g.update_from_event(_result("t2"))
 
-    panel._active_turn = None
+    panel._active_turn = None  # LIVE = current turn only
     sub = panel._flow_subgraph()
     flow_nodes = [n for nid, n in sub.nodes.items() if nid != ROOT_ID]
-    assert len(flow_nodes) == 2
+    # LIVE shows only the current turn (turn 1 = executor), not all turns
+    assert len(flow_nodes) == 1
 
 
 # -------------------------------------------------------------------

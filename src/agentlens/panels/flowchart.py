@@ -290,9 +290,13 @@ class FlowchartPanel(ScrollableContainer):
         if not history:
             return sub
 
-        # Optionally filter by turn.
-        if self._active_turn is not None:
-            history = [r for r in history if r.turn_index == self._active_turn]
+        # Always filter by turn — LIVE shows the current turn only
+        # (not the entire session), past turns are browsable via [/].
+        turn = self._active_turn
+        if turn is None:
+            turn = self._graph.get_current_turn_index()
+        if turn >= 0:
+            history = [r for r in history if r.turn_index == turn]
             if not history:
                 return sub
 

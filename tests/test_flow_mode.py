@@ -374,20 +374,25 @@ def test_flow_history_survives_flush() -> None:
 # 12. Flow subgraph uses history not instances (survives flush)
 # -------------------------------------------------------------------
 def test_flow_subgraph_uses_history_not_instances() -> None:
-    """After flush, _flow_subgraph still returns nodes from history."""
+    """After flush, _flow_subgraph still returns nodes from history
+    when navigating to the old turn via _active_turn.
+    """
     panel = FlowchartPanel()
     g = panel._graph
 
+    # Start a turn so planner gets turn_index = 0.
+    g.update_from_event(_user_message("first turn"))
     g.update_from_event(_agent_use("planner", tid="t1"))
     g.update_from_event(_result("t1"))
 
-    # Flush instances.
+    # Flush instances by starting a new turn.
     g.update_from_event(_user_message("next turn"))
 
     # Instances should be empty.
     assert len(g.nodes["agent:planner"]._instances) == 0
 
-    # But flow subgraph still has the node from history.
+    # Navigate to the old turn — FlowRecords survive flush.
+    panel._active_turn = 0
     sub = panel._flow_subgraph()
     flow_nodes = [n for nid, n in sub.nodes.items() if nid != ROOT_ID]
     assert len(flow_nodes) == 1
