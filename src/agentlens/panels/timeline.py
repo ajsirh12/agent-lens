@@ -38,6 +38,7 @@ class TimelinePanel(Container):
         self._row_message: dict[Any, str | None] = {}
         self._tool_use_row: dict[str, Any] = {}  # tool_use_id -> row_key
         self._row_input: dict[Any, str] = {}  # row_key -> input preview
+        self._pending_tool_name: dict[str, str] = {}  # tool_use_id -> raw tool_name
         self._updating = False
         self._row_count = 0
         self.max_rows = max_rows
@@ -82,10 +83,11 @@ class TimelinePanel(Container):
         was_at_bottom = self._was_at_bottom()
         if ev.type == EventType.tool_use:
             tid = ev.tool_use_id or ""
+            raw_tool = ev.tool_name or "?"
             ts_str = ev.ts.strftime("%H:%M:%S")
             row_key = self._table.add_row(
                 ts_str,
-                _sanitize_cell(ev.tool_name or "?"),
+                _sanitize_cell("▶ " + raw_tool),
                 _sanitize_cell((ev.agent_id or "-")[:20]),
                 "running",
                 "-",
@@ -94,6 +96,10 @@ class TimelinePanel(Container):
             self._row_agent[row_key] = ev.agent_id
             self._row_message[row_key] = ev.message_id
             if tid:
+                self._pending_tool_name[tid] = raw_tool
+                if len(self._pending_tool_name) > MAX_PENDING:
+                    oldest = next(iter(self._pending_tool_name))
+                    del self._pending_tool_name[oldest]
                 self._tool_use_row[tid] = row_key
                 if len(self._tool_use_row) > MAX_PENDING:
                     oldest_key = next(iter(self._tool_use_row))
@@ -130,22 +136,40 @@ class TimelinePanel(Container):
             tid = ev.tool_use_id or ""
             if tid and tid in self._tool_use_row:
                 row_key = self._tool_use_row[tid]
+                started = self._pending_use.pop(tid, None)
+                dur_ms = "-"
+                if started is not None:
+                    dur_ms = str(max(0, int((ev.ts.timestamp() - started) * 1000)))
+                status = "err" if ev.is_error else "ok"
                 try:
-                    started = self._pending_use.pop(tid, None)
-                    dur_ms = "-"
-                    if started is not None:
-                        dur_ms = str(max(0, int((ev.ts.timestamp() - started) * 1000)))
-                    status = "err" if ev.is_error else "ok"
                     self._table.update_cell_at((self._row_index(row_key), 3), status)
                     self._table.update_cell_at((self._row_index(row_key), 4), dur_ms)
                 except Exception:
                     pass
+                # Add a completion row at the current (result) timestamp.
+                end_ts = ev.ts.strftime("%H:%M:%S")
+                tool_name = self._pending_tool_name.pop(tid, "?")
+                end_agent = self._row_agent.get(row_key, "-")
+                completion_row_key = self._table.add_row(
+                    end_ts,
+                    _sanitize_cell("✓ " + tool_name),
+                    _sanitize_cell((str(end_agent) if end_agent else "-")[:20]),
+                    status,
+                    dur_ms,
+                )
+                self._row_count += 1
+                self._row_agent[completion_row_key] = end_agent
+                self._row_message[completion_row_key] = self._row_message.get(row_key)
+                self._row_input[completion_row_key] = self._row_input.get(row_key, "")
+                self._enforce_cap()
+                if was_at_bottom:
+                    self._scroll_to_end()
             else:
                 # Orphan result — still surface it as a row.
                 ts_str = ev.ts.strftime("%H:%M:%S")
                 self._table.add_row(
                     ts_str,
-                    "result",
+                    _sanitize_cell("✓ result"),
                     (ev.agent_id or "-")[:20],
                     "err" if ev.is_error else "ok",
                     "-",
@@ -310,6 +334,7 @@ class TimelinePanel(Container):
         self._row_input = {}
         self._row_agent = {}
         self._row_message = {}
+        self._pending_tool_name = {}
         self._updating = False
         self._row_count = 0
         self._scroll_pending = False
