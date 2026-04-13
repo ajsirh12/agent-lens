@@ -78,7 +78,7 @@ def _format_tool_breakdown(breakdown: dict[str, int], inner_w: int) -> str:
     return " ".join(shown)[:inner_w]
 
 Orientation = Literal["topdown", "leftright"]
-Mode = Literal["all", "running"]
+Mode = Literal["all", "running", "flow"]
 
 
 class FlowchartPanel(ScrollableContainer):
@@ -159,7 +159,12 @@ class FlowchartPanel(ScrollableContainer):
         return self._orientation
 
     def toggle_mode(self) -> Mode:
-        self._mode = "running" if self._mode == "all" else "all"
+        if self._mode == "all":
+            self._mode = "running"
+        elif self._mode == "running":
+            self._mode = "flow"
+        else:
+            self._mode = "all"
         self._layout = self._compute_layout()
         self._refresh_canvas()
         return self._mode
@@ -170,6 +175,8 @@ class FlowchartPanel(ScrollableContainer):
         graph = self._graph
         if self._mode == "running":
             graph = self._running_subgraph()
+        elif self._mode == "flow":
+            graph = self._flow_subgraph()
         if self._orientation == "leftright":
             return layout_leftright(graph)
         return layout_topdown(graph)
@@ -252,17 +259,67 @@ class FlowchartPanel(ScrollableContainer):
                 )
         return sub
 
+    def _flow_subgraph(self) -> CallGraph:
+        """Build a temporal execution DAG from all recorded Instances.
+
+        Each invocation becomes its own Node keyed by
+        ``{base_node_id}@{sequence_index}``. Temporal edges connect
+        them in started_ts order as a linear chain: root -> first ->
+        second -> ... -> last. This directly reveals the execution
+        sequence.
+        """
+        from ..graph_model import Instance
+
+        sub = CallGraph()
+
+        # Collect all instances across all nodes.
+        all_instances: list[tuple[float, str, str, Instance, Node]] = []
+        for nid, node in self._graph.nodes.items():
+            if nid == ROOT_ID:
+                continue
+            for tid, inst in node._instances.items():
+                all_instances.append((inst.started_ts, nid, tid, inst, node))
+
+        # Sort by start timestamp. Stable sort preserves insertion
+        # order for same-ts entries (= JSONL line order).
+        all_instances.sort(key=lambda x: x[0])
+
+        # Build linear chain: root -> node@0 -> node@1 -> ...
+        prev_vid = ROOT_ID
+        for i, (ts, nid, tid, inst, node) in enumerate(all_instances):
+            vid = f"{nid}@{i}"
+            sub.nodes[vid] = Node(
+                id=vid,
+                label=node.label,
+                node_type=node.node_type,
+                status=inst.status,
+                call_count=1,
+                last_ts=inst.started_ts,
+                tool_breakdown=dict(inst.tool_breakdown),
+            )
+            sub.edges[(prev_vid, vid)] = Edge(
+                parent_id=prev_vid, child_id=vid, count=1,
+            )
+            prev_vid = vid
+
+        return sub
+
     @staticmethod
     def _base_node_id(nid: str | None) -> str | None:
-        """Strip the ``#<tid>`` suffix added to virtual instance nodes.
+        """Strip the ``#<tid>`` or ``@<seq>`` suffix added to virtual nodes.
 
         Running-mode may expand a node ``agent:executor`` into virtual
-        ids like ``agent:executor#a1b2c3``. Cross-highlight uses the
-        canonical base id so timeline matching works without changes.
+        ids like ``agent:executor#a1b2c3``. Flow-mode uses
+        ``agent:executor@0``. Cross-highlight uses the canonical base
+        id so timeline matching works without changes.
         """
         if not nid:
             return nid
-        return nid.split("#", 1)[0]
+        # Strip both virtual-instance (#tid) and flow-sequence (@seq)
+        # suffixes to recover the canonical base node id.
+        base = nid.split("#", 1)[0]
+        base = base.split("@", 1)[0]
+        return base
 
     # ------------------------------------------------------------------
     def _refresh_canvas(self) -> None:
@@ -367,9 +424,10 @@ class FlowchartPanel(ScrollableContainer):
         # must check the BASE id against _current_turn since the raw
         # graph only knows the canonical form.
         effective_status = node.status
-        base_id = self._base_node_id(node.id)
-        if base_id and self._graph.is_in_current_turn(base_id):
-            effective_status = "running"
+        if self._mode != "flow":
+            base_id = self._base_node_id(node.id)
+            if base_id and self._graph.is_in_current_turn(base_id):
+                effective_status = "running"
         style = STATUS_STYLE.get(effective_status, "")
         if highlight:
             style = (style + " bold reverse").strip()

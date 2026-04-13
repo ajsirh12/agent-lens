@@ -167,8 +167,11 @@ async def test_flowchart_toggle_mode_filters_done_nodes(tmp_path: Path) -> None:
         assert "agent:runner" in fc._layout.nodes
         assert "agent:finisher" not in fc._layout.nodes
 
-        # Toggle back to all: finisher returns.
-        await pilot.press("m")
+        # Toggle through flow back to all: finisher returns.
+        await pilot.press("m")  # running -> flow
+        await pilot.pause()
+        assert fc.get_mode() == "flow"
+        await pilot.press("m")  # flow -> all
         await pilot.pause()
         assert fc.get_mode() == "all"
         assert "agent:finisher" in fc._layout.nodes
