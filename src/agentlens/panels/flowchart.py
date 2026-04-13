@@ -328,8 +328,16 @@ class FlowchartPanel(ScrollableContainer):
                 parent_id=parent, child_id=vid, count=1,
             )
 
-            # If this record has completed, add it to the completed list.
-            if rec.ended_ts is not None:
+            # If this record has genuinely completed, add it to the
+            # completed list. Background agents get an instant tool_result
+            # ack ("Async agent launched") with ended_ts ≈ started_ts
+            # (< 0.5s). These aren't real completions — the actual work
+            # runs for seconds. Treating them as completed would make
+            # every subsequent parallel spawn chain linearly instead of
+            # forking, because the fork detector thinks "previous agent
+            # already finished before this one started."
+            _MIN_REAL_DURATION = 0.5
+            if rec.ended_ts is not None and (rec.ended_ts - rec.started_ts) >= _MIN_REAL_DURATION:
                 completed.append((rec.ended_ts, vid))
                 completed.sort(key=lambda x: x[0])
 
