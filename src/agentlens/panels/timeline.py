@@ -190,7 +190,7 @@ class TimelinePanel(Container):
                 self._turn_counter += 1
                 turn_num = self._turn_counter
                 prompt = str(ev.payload.get("text", ""))[:35]
-                marker_text = f"\u2500\u2500 Turn {turn_num}: {prompt} \u2500\u2500"
+                marker_text = f"=== Turn {turn_num}: {prompt} ==="
                 ts_str = ev.ts.strftime("%H:%M:%S")
                 row_key = self._table.add_row(
                     ts_str,
@@ -373,6 +373,36 @@ class TimelinePanel(Container):
             pass
         if self._placeholder is not None:
             self._placeholder.display = True
+
+    def scroll_to_turn(self, turn_num: int) -> None:
+        """Scroll the timeline to the row for the given turn marker.
+
+        Searches for a row whose ``_row_agent`` is ``__turn:<num>``
+        and moves the cursor there. Called by app's turn navigation
+        actions so pressing ``[`` / ``]`` visually jumps to the turn.
+        """
+        if self._table is None:
+            return
+        target_key = None
+        marker = f"__turn:{turn_num}"
+        for rk, agent_val in self._row_agent.items():
+            if agent_val == marker:
+                target_key = rk
+                break
+        if target_key is None:
+            return
+        self._updating = True
+        try:
+            idx = self._row_index(target_key)
+            self._table.move_cursor(row=idx, animate=False)
+        except Exception:
+            pass
+        finally:
+            self._updating = False
+
+    def scroll_to_end_live(self) -> None:
+        """Scroll to the last row (for LIVE mode return)."""
+        self._scroll_to_end()
 
     def get_selected_input_summary(self) -> str:
         """Return the stored input preview for the currently-selected row, or ''."""

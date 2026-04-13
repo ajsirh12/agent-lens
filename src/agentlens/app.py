@@ -546,12 +546,11 @@ class AgentlensApp(App[int]):
         if not turns:
             return
         if self._active_turn is None:
-            # Currently LIVE -> go to the last completed turn
             self._active_turn = max(0, len(turns) - 2)
         elif self._active_turn > 0:
             self._active_turn -= 1
         self._update_footer()
-        # Phase 2 will add: self._flowchart.set_active_turn(self._active_turn)
+        self._scroll_timeline_to_active_turn()
 
     def action_next_turn(self) -> None:
         """Navigate to the next turn, or LIVE if at the end."""
@@ -561,17 +560,34 @@ class AgentlensApp(App[int]):
         if not turns:
             return
         if self._active_turn is None:
-            return  # already LIVE
+            return
         if self._active_turn >= len(turns) - 1:
-            self._active_turn = None  # go to LIVE
+            self._active_turn = None
         else:
             self._active_turn += 1
         self._update_footer()
+        self._scroll_timeline_to_active_turn()
 
     def action_live_turn(self) -> None:
         """Jump to LIVE (current turn)."""
         self._active_turn = None
         self._update_footer()
+        if self._timeline is not None:
+            self._timeline.scroll_to_end_live()
+
+    def _scroll_timeline_to_active_turn(self) -> None:
+        """Scroll the Timeline to the selected turn's marker row."""
+        if self._timeline is None or self._active_turn is None:
+            return
+        # Timeline turn numbers are 1-indexed (_turn_counter starts at 1)
+        # Graph turn indices are 0-indexed. The mapping:
+        # graph turn index 0 → timeline marker "Turn 1"
+        # But we need to figure out the correct turn_num.
+        # During catch-up, both counters increment for each real
+        # user_message. The Nth real prompt creates graph turn N-1
+        # (0-indexed) AND timeline marker N (1-indexed).
+        turn_num = self._active_turn + 1
+        self._timeline.scroll_to_turn(turn_num)
 
     # --- flowchart scroll actions ---------------------------------------
 
