@@ -98,7 +98,7 @@ agentlens
 
 | Key | Action | 효과 |
 |---|---|---|
-| `m` | Mode: **all ↔ running** | all = 누적 집계 뷰, running = 현재 턴만 (sticky) + 병렬 instance 분리 |
+| `m` | Mode: **all → running → flow** | all = 누적 집계 뷰, running = 현재 턴 (sticky + 병렬 분리), flow = 시간순 실행 DAG |
 | `o` | Orientation: **LR ↔ TD** | LR = 왼→오 (팬아웃 최적), TD = 위→아래 (깊이 최적) |
 | `p` | Panes: **H ↔ V** | Timeline/Flowchart 를 좌우 배치 / 상하 배치 |
 
@@ -171,6 +171,51 @@ POSIX 사용자는 slug fast path 에서 곧바로 매칭되므로 이 fallback 
 전환 후 footer 의 `locator_reason` 이 `[switched]` 로 표시되어 전환된 세션임을 구분할 수 있습니다.
 
 **주의**: `s` 는 현재 slug 디렉토리 내부의 세션만 보여줍니다. 다른 프로젝트의 세션을 보려면 `q` 로 종료 후 `--project-root` 나 `--session` 으로 재시작해야 합니다.
+
+### Flow 모드 (`[flow]`)
+
+`m` 키로 세 번째 모드에 진입하면 **세션 전체의 실행 흐름을 시간순 DAG** 로 보여줍니다.
+
+특성:
+- 각 Agent/Skill 호출이 **개별 노드** — dedup 없음, `(xN)` 카운터 없음
+- 노드 label 은 각 호출의 **`description` 필드** (e.g. "Schema probe", "Critic round 1 REJECT"). 없으면 agent type 이름 fallback.
+- **Temporal edge**: 각 노드가 "가장 최근 완료된 predecessor" 에 연결
+  - 순차 호출 → 선형 chain
+  - 병렬 spawn → 같은 부모에서 fork (분기)
+  - 병렬 완료 후 다음 호출 → 마지막 완료된 branch 에서 join
+- 데이터 소스: `FlowRecord` (세션 영속). user_message flush 에 **보존**됨 → 이전 턴의 호출도 계속 보임
+- 세션 전환 (`s`/`Shift+S`) 시에만 초기화
+- `MAX_NODES = 500` cap
+
+예시 (reject→retry loop + 병렬):
+```
+         ┌→ "Parallel A…"
+main ─→ "Schema…" ─→ "Review…" ─┤                  ─→ "Critic REJ…" ─→ "Planner rev…" ─→ "Critic APP…"
+         └→ "Parallel B…"
+```
+
+3개 모드 비교:
+
+| 모드 | 데이터 수명 | 노드 = ? | 엣지 = ? |
+|---|---|---|---|
+| `[all]` | 세션 영속 | agent TYPE (dedup) | spawn 관계 |
+| `[running]` | 턴 스코프 (flush 시 초기화) | instance 별 분리 | spawn 관계 |
+| `[flow]` | **세션 영속 (FlowRecord)** | **각 호출 개별** | **시간 순서 (temporal)** |
+
+### Timeline `▶`/`✓` 시작/완료 마커
+
+Timeline 의 각 tool call 이 두 행으로 표시됩니다:
+- `▶ toolname` — 시작 행 (tool_use 도착 시, start timestamp)
+- `✓ toolname` — 완료 행 (tool_result 도착 시, **end timestamp**)
+
+```
+14:02:01  ▶ Agent    running   -
+14:02:01  ▶ Agent    running   -
+14:02:15  ✓ Agent    ok        14000
+14:02:30  ✓ Agent    ok        29000
+```
+
+완료 행은 result 의 timestamp 로 표시되어 **무엇이 먼저 끝났는지** 시간순으로 바로 보입니다. 시작 행도 status/duration 이 in-place 갱신되므로 스크롤해서 돌아봐도 최종 상태가 보입니다.
 
 ### Sticky Running
 Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트가 올 때까지** 노드는 초록(running) 으로 유지됩니다. 빠른 agent 가 바로 회색으로 바뀌어 놓치는 것을 방지합니다.
@@ -309,7 +354,7 @@ python scripts/fake_session.py --target /tmp/fake.jsonl --count 200 --rate 10 --
 ## 9. 테스트 실행
 
 ```bash
-pytest -q                                # 전체 (123 tests)
+pytest -q                                # 전체 (177 tests)
 pytest -q tests/test_parser.py
 pytest -q tests/test_instance_view.py
 pytest -q tests/test_flowchart_panel.py

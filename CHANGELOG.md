@@ -8,6 +8,68 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [0.5.0] - 2026-04-13
+
+Flow mode, timeline start/end markers, and description-based labels.
+The Flowchart panel now has three modes (all / running / flow) and
+flow mode persists across turns for full session orchestration
+visibility. 177 tests passing.
+
+### Added
+
+- **Flowchart `[flow]` mode** — third mode via `m` key cycle
+  (`all → running → flow → all`). Each Agent/Skill invocation is
+  an individual node (no dedup) connected by temporal edges in
+  execution order. Parallel spawns fork from the same predecessor;
+  sequential calls chain linearly. Shows the entire session's
+  orchestration sequence as a DAG.
+- **FlowRecord** — session-persistent record of each invocation.
+  Unlike Instance (turn-scoped, cleared on flush), FlowRecord
+  survives across user prompts for the entire session. Only cleared
+  on session switch. Capped at MAX_NODES.
+- **Parallel fork detection** in flow mode: each node connects to
+  the most recently *completed* predecessor (latest `ended_ts <=
+  started_ts`). Agents spawned before their predecessor finishes
+  naturally fork from the same parent. Visible as multi-row
+  branching in LR layout and multi-column branching in TD layout.
+- **Description-based labels** in flow mode: each node displays the
+  Agent call's `description` field ("Schema probe", "Critic round
+  1 REJECT") instead of the generic type name. Falls back to type
+  when no description is provided. Works in all environments
+  (OMC, non-OMC, harness).
+- **Timeline `▶`/`✓` start/end markers**: tool_use rows now show
+  `▶ toolname` and tool_result events add a NEW completion row
+  `✓ toolname` at the result's timestamp. Reveals temporal
+  ordering of completions (who finished first) without needing
+  flow mode.
+- **Per-node selection in flow mode**: clicking a flow node
+  highlights only that exact node (via `_selected_flow_vid`),
+  not every node sharing the same base agent type.
+- **Drill-down failure notifications**: `action_drill_down` now
+  surfaces toast messages when selection fails (no agent selected,
+  node not found, not an agent type) instead of silently no-opping.
+- **Scroll-offset click fix**: flowchart node selection via mouse
+  now accounts for `scroll_x`/`scroll_y` so clicking after
+  scrolling hits the intended node.
+
+### Fixed
+
+- **Footer mode tag** showed "all" for flow mode due to a binary
+  conditional that predated the three-mode cycle. Now uses the mode
+  string directly.
+- **Flowchart click coordinates** were viewport-relative but layout
+  positions were canvas-absolute. Added scroll offset compensation
+  so selection works after scrolling.
+
+### Tests
+
+- Full suite: 161 → 177 passing (+16). New test files:
+  `tests/test_flow_mode.py` (16 tests covering mode cycle,
+  subgraph topology, description labels, parallel fork, sequential
+  join, history persistence, single-node selection).
+
+---
+
 ## [0.4.0] - 2026-04-09
 
 Windows / git-bash compatibility and UX escape hatches. Adds a
