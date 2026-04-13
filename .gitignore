@@ -61,6 +61,9 @@ Thumbs.db
 .omc/
 state/
 
+# Harness workspace (runtime artifacts)
+.claude/_workspace/
+
 # Environment variables
 .env
 .env.local
