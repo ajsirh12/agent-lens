@@ -22,6 +22,15 @@ from .events import EventType, HarnessEvent
 NodeType = Literal["root", "agent", "skill"]
 NodeStatus = Literal["running", "done", "error"]
 
+
+@dataclass
+class TurnRecord:
+    """A user-prompt turn boundary."""
+    index: int          # 0-based turn number
+    start_ts: float     # timestamp of the user_message that started this turn
+    end_ts: float | None = None  # timestamp of next turn's start (None = current/live)
+    prompt_preview: str = ""     # first 40 chars of user prompt
+
 ROOT_ID = "main"
 
 # Hard cap on total node count — protects against untrusted JSONL payloads
@@ -122,6 +131,7 @@ class FlowRecord:
     started_ts: float
     ended_ts: float | None = None
     status: NodeStatus = "running"
+    turn_index: int = 0
 
 
 @dataclass
@@ -139,6 +149,7 @@ class Instance:
     ended_ts: float | None = None
     description: str = ""
     subagent_uuid: str | None = None
+    turn_index: int = 0
     # Per-instance tool-call counts (Phase 2a). Mirrors the node-level
     # ``tool_breakdown`` aggregate but scoped to a single spawn so the
     # running-mode instance view can show distinct badges per parallel
@@ -203,6 +214,8 @@ class CallGraph:
     _flow_tid_to_index: dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        self._turns: list[TurnRecord] = []
+        self._current_turn_index: int = -1  # -1 = no turns yet
         if ROOT_ID not in self.nodes:
             self.nodes[ROOT_ID] = Node(
                 id=ROOT_ID,
@@ -218,6 +231,17 @@ class CallGraph:
         'running' until the next user_message flushes the turn.
         """
         return node_id in self._current_turn
+
+    def get_turns(self) -> list[TurnRecord]:
+        return list(self._turns)
+
+    def get_current_turn_index(self) -> int:
+        return self._current_turn_index
+
+    def clear_turns(self) -> None:
+        """Reset turn tracking. Called on session switch."""
+        self._turns.clear()
+        self._current_turn_index = -1
 
     # ------------------------------------------------------------------
     def update_from_event(self, ev: HarnessEvent) -> bool:
@@ -256,6 +280,17 @@ class CallGraph:
                 # turn boundary. Skip the flush so sticky-running nodes
                 # stay visible until the actual next user prompt.
                 return False
+            # Close the previous turn and open a new one.
+            ts_epoch = ev.ts.timestamp() if ev.ts is not None else 0.0
+            prompt_text = str(ev.payload.get("text", ""))[:40]
+            if self._turns:
+                self._turns[-1].end_ts = ts_epoch
+            self._turns.append(TurnRecord(
+                index=len(self._turns),
+                start_ts=ts_epoch,
+                prompt_preview=prompt_text,
+            ))
+            self._current_turn_index = len(self._turns) - 1
             # New user turn — flush the sticky-running set so nodes from
             # the previous turn transition to their real done/error state
             # on the next render. Also clear per-node _instances so the
@@ -371,6 +406,7 @@ class CallGraph:
                     status="running",
                     started_ts=ts_epoch,
                     description=desc,
+                    turn_index=self._current_turn_index,
                 )
             # Append a session-persistent FlowRecord for flow mode.
             # Cap at MAX_NODES to bound memory.
@@ -382,6 +418,7 @@ class CallGraph:
                     description=desc,
                     node_type=ntype,
                     started_ts=ts_epoch,
+                    turn_index=self._current_turn_index,
                 )
                 self._flow_history.append(rec)
                 self._flow_tid_to_index[tid] = len(self._flow_history) - 1

@@ -56,6 +56,9 @@ class AgentlensApp(App[int]):
         # names makes the binding work in tests AND in a live TTY.
         ("shift+s", "open_session_path", "Open session by path"),
         ("S", "open_session_path", "Open session by path"),
+        ("[", "prev_turn", "Prev turn"),
+        ("]", "next_turn", "Next turn"),
+        ("\\", "live_turn", "LIVE turn"),
     ]
 
     selected_agent_id: reactive[str | None] = reactive(None)
@@ -89,6 +92,7 @@ class AgentlensApp(App[int]):
         self._subagent_manager: SubagentWatcherManager | None = None
         self._watcher_worker: Worker | None = None
         self._subagent_worker: Worker | None = None
+        self._active_turn: int | None = None  # None = LIVE (current turn)
 
     def compose(self) -> ComposeResult:
         with Container(id="main"):
@@ -220,7 +224,22 @@ class AgentlensApp(App[int]):
                 pane_tag = "V"
         except Exception:
             pass
-        return f"  nodes: {n} edges: {e}  [{mode_tag}/{orient_tag}/{pane_tag}]"
+        # Turn indicator
+        turns = self._flowchart._graph.get_turns()
+        total_turns = len(turns)
+        if self._active_turn is not None and total_turns > 0:
+            turn_label = f"Turn {self._active_turn + 1}/{total_turns}"
+            if self._active_turn < total_turns:
+                preview = turns[self._active_turn].prompt_preview[:20]
+                if preview:
+                    turn_label += f' "{preview}\u2026"'
+        else:
+            turn_label = "LIVE" if total_turns > 0 else ""
+
+        suffix = f"  nodes: {n} edges: {e}  [{mode_tag}/{orient_tag}/{pane_tag}]"
+        if turn_label:
+            suffix += f"  {turn_label}"
+        return suffix
 
     def _short_session_path(self) -> str:
         """Compact form of active_session_path that fits narrow terminals.
@@ -467,6 +486,7 @@ class AgentlensApp(App[int]):
                 self._flowchart.clear()
             self.last_event_monotonic = 0.0
             self.selected_agent_id = None
+            self._active_turn = None
             self._start_session_workers(chosen)
             self._update_footer()
 
@@ -498,6 +518,7 @@ class AgentlensApp(App[int]):
                 self._flowchart.clear()
             self.last_event_monotonic = 0.0
             self.selected_agent_id = None
+            self._active_turn = None
             self._start_session_workers(chosen)
             self._update_footer()
 
@@ -513,6 +534,43 @@ class AgentlensApp(App[int]):
         except Exception:
             return
         main.toggle_class("vpanes")
+        self._update_footer()
+
+    # --- turn navigation actions ------------------------------------------
+
+    def action_prev_turn(self) -> None:
+        """Navigate to the previous turn."""
+        if self._flowchart is None:
+            return
+        turns = self._flowchart._graph.get_turns()
+        if not turns:
+            return
+        if self._active_turn is None:
+            # Currently LIVE -> go to the last completed turn
+            self._active_turn = max(0, len(turns) - 2)
+        elif self._active_turn > 0:
+            self._active_turn -= 1
+        self._update_footer()
+        # Phase 2 will add: self._flowchart.set_active_turn(self._active_turn)
+
+    def action_next_turn(self) -> None:
+        """Navigate to the next turn, or LIVE if at the end."""
+        if self._flowchart is None:
+            return
+        turns = self._flowchart._graph.get_turns()
+        if not turns:
+            return
+        if self._active_turn is None:
+            return  # already LIVE
+        if self._active_turn >= len(turns) - 1:
+            self._active_turn = None  # go to LIVE
+        else:
+            self._active_turn += 1
+        self._update_footer()
+
+    def action_live_turn(self) -> None:
+        """Jump to LIVE (current turn)."""
+        self._active_turn = None
         self._update_footer()
 
     # --- flowchart scroll actions ---------------------------------------

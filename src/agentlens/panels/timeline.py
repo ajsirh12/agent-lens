@@ -10,6 +10,7 @@ from textual.containers import Container
 from textual.widgets import DataTable, Static
 
 from ..events import EventType, HarnessEvent
+from ..graph_model import _is_real_user_prompt
 from ..messages import HarnessEventMessage
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class TimelinePanel(Container):
         # add_events in one frame result in a single cursor move at the
         # next refresh tick instead of 500 redundant move_cursor calls.
         self._scroll_pending = False
+        self._turn_counter: int = 0
 
     def compose(self) -> ComposeResult:
         self._placeholder = Static("waiting for events…", classes="placeholder")
@@ -175,6 +177,26 @@ class TimelinePanel(Container):
                     "-",
                 )
                 self._row_count += 1
+                self._hide_placeholder()
+                self._enforce_cap()
+                if was_at_bottom:
+                    self._scroll_to_end()
+        elif ev.type == EventType.user_message:
+            if _is_real_user_prompt(ev):
+                self._turn_counter += 1
+                turn_num = self._turn_counter
+                prompt = str(ev.payload.get("text", ""))[:35]
+                marker_text = f"\u2500\u2500 Turn {turn_num}: {prompt} \u2500\u2500"
+                ts_str = ev.ts.strftime("%H:%M:%S")
+                row_key = self._table.add_row(
+                    ts_str,
+                    _sanitize_cell(marker_text),
+                    "",
+                    "",
+                    "",
+                )
+                self._row_count += 1
+                self._row_agent[row_key] = f"__turn:{turn_num}"
                 self._hide_placeholder()
                 self._enforce_cap()
                 if was_at_bottom:
@@ -338,6 +360,7 @@ class TimelinePanel(Container):
         self._updating = False
         self._row_count = 0
         self._scroll_pending = False
+        self._turn_counter = 0
         if self._table is None:
             return
         try:
