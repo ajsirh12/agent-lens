@@ -210,7 +210,7 @@ class AgentlensApp(App[int]):
         except Exception:
             return ""
         orient_tag = "LR" if orient == "leftright" else "TD"
-        mode_tag = "running" if mode == "running" else "all"
+        mode_tag = mode  # "all", "running", or "flow"
         # Pane layout: V if the main container has the vpanes class,
         # H otherwise (default horizontal layout).
         pane_tag = "H"
