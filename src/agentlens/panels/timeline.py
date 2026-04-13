@@ -182,6 +182,10 @@ class TimelinePanel(Container):
                 if was_at_bottom:
                     self._scroll_to_end()
         elif ev.type == EventType.user_message:
+            # Must match graph_model's turn boundary criteria exactly:
+            # skip subagent user rows AND system-injected messages.
+            if ev.payload.get("subagent_uuid"):
+                return
             if _is_real_user_prompt(ev):
                 self._turn_counter += 1
                 turn_num = self._turn_counter
