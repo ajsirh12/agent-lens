@@ -301,8 +301,16 @@ class FlowchartPanel(ScrollableContainer):
                 return sub
 
         # Track completed nodes in chronological order of their end time.
-        # Each entry: (ended_ts, vid). Kept sorted by ended_ts.
-        completed: list[tuple[float, str]] = []
+        # Two lists: foreground completions (usable by any successor) and
+        # all completions including background (usable only by non-background).
+        # Background agents spawned together should share a parent, not
+        # chain through each other.
+        #
+        # Each entry: (ended_ts, vid).
+        completed_fg: list[tuple[float, str]] = []  # foreground only
+        completed_all: list[tuple[float, str]] = []  # fg + background
+
+        _MIN_REAL_DURATION = 0.5
 
         for i, rec in enumerate(history):
             vid = f"{rec.node_id}@{i}"
@@ -318,8 +326,12 @@ class FlowchartPanel(ScrollableContainer):
 
             # Find parent: the most recently COMPLETED node whose
             # end time is <= this node's start time.
+            # Background agents only look at foreground completions so
+            # parallel background spawns share the same parent instead
+            # of chaining through each other.
             parent = ROOT_ID
-            for end_ts, completed_vid in reversed(completed):
+            source = completed_fg if rec.is_background else completed_all
+            for end_ts, completed_vid in reversed(source):
                 if end_ts <= rec.started_ts:
                     parent = completed_vid
                     break
@@ -328,18 +340,14 @@ class FlowchartPanel(ScrollableContainer):
                 parent_id=parent, child_id=vid, count=1,
             )
 
-            # If this record has genuinely completed, add it to the
-            # completed list. Background agents get an instant tool_result
-            # ack ("Async agent launched") with ended_ts ≈ started_ts
-            # (< 0.5s). These aren't real completions — the actual work
-            # runs for seconds. Treating them as completed would make
-            # every subsequent parallel spawn chain linearly instead of
-            # forking, because the fork detector thinks "previous agent
-            # already finished before this one started."
-            _MIN_REAL_DURATION = 0.5
+            # Add to completed lists if genuinely finished.
             if rec.ended_ts is not None and (rec.ended_ts - rec.started_ts) >= _MIN_REAL_DURATION:
-                completed.append((rec.ended_ts, vid))
-                completed.sort(key=lambda x: x[0])
+                entry = (rec.ended_ts, vid)
+                completed_all.append(entry)
+                completed_all.sort(key=lambda x: x[0])
+                if not rec.is_background:
+                    completed_fg.append(entry)
+                    completed_fg.sort(key=lambda x: x[0])
 
         return sub
 

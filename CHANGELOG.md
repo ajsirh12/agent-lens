@@ -8,6 +8,68 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [0.6.0] - 2026-04-13
+
+Background agent completion tracking, parallel fork/join accuracy, and
+turn-based navigation. The Flowchart panel now correctly visualizes
+parallel (background) agent spawns as forks and joins them to the
+correct predecessor on completion. 196 tests passing.
+
+### Added
+
+- **Turn-based navigation** — `[` (previous), `]` (next), `\` (LIVE)
+  keys filter both Flowchart and Timeline to a specific turn. All
+  three modes (all/running/flow) respect the active turn filter.
+  Border turns yellow when filtered; title shows "Turn N/M".
+- **`queue-operation` / task-notification parsing** — the parser now
+  extracts `tool_use_id`, `status`, and `duration_ms` from Claude
+  Code's `queue-operation` (enqueue) JSONL rows. Background agents'
+  FlowRecords are updated with their real completion time instead of
+  the instant ack (~0.005s). This enables accurate fork/join
+  detection for parallel agents.
+- **Pending task-notification handling** — when a `queue-operation`
+  row arrives before the corresponding `tool_use` (JSONL write-order
+  race condition), the notification is stashed and applied
+  retroactively when the FlowRecord is created.
+- **Background agent grouping in fork detection** — FlowRecords now
+  carry an `is_background` flag (from `run_in_background` input).
+  Background agents only consider foreground completions as
+  predecessors, so parallel background spawns share the same parent
+  instead of chaining through each other.
+- **`subagent_type` fallback** — Agent tool_use events without a
+  `subagent_type` field now default to `"general-purpose"` instead
+  of being silently dropped. Fixes flow mode not showing agents
+  spawned without an explicit type.
+- **`EventType.task_notification`** — new event type for background
+  agent completion signals.
+- **Flow LIVE shows current turn only** — `_active_turn == None`
+  now renders only the current turn's flow records, not the entire
+  session history.
+
+### Fixed
+
+- **Fork detection ignored instant acks** — tool_result events with
+  duration < 0.5s (background agent "Async agent launched" acks)
+  are excluded from the completed-predecessor list, preventing
+  false linear chains where forks should appear.
+- **Turn markers scrolled to top** — `[`/`]` keys now call
+  `scroll_to_turn()` to jump the Timeline to the selected marker.
+- **False turn markers from subagent prompts** — subagent initial
+  prompt text that passed `_is_real_user_prompt` no longer creates
+  spurious turn boundaries.
+- **Timeline subagent event exclusion** — events with
+  `subagent_uuid` are skipped in the Timeline for clean time
+  ordering.
+
+### Tests
+
+- Full suite: 177 → **196 passing** (+19). New tests cover fork
+  detection with instant acks, real completion chains, turn
+  filtering, turn navigation keys, border color changes, and
+  footer count accuracy.
+
+---
+
 ## [0.5.0] - 2026-04-13
 
 Flow mode, timeline start/end markers, and description-based labels.

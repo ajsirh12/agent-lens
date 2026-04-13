@@ -132,6 +132,7 @@ class FlowRecord:
     ended_ts: float | None = None
     status: NodeStatus = "running"
     turn_index: int = 0
+    is_background: bool = False
 
 
 @dataclass
@@ -212,6 +213,9 @@ class CallGraph:
     # full execution history across all turns.
     _flow_history: list["FlowRecord"] = field(default_factory=list)
     _flow_tid_to_index: dict[str, int] = field(default_factory=dict)
+    # Pending task-notification payloads for background agents whose
+    # queue-operation row arrived before the assistant tool_use row.
+    _pending_task_notifications: dict[str, dict] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._turns: list[TurnRecord] = []
@@ -266,6 +270,8 @@ class CallGraph:
             return self._handle_tool_use(ev)
         if ev.type == EventType.tool_result:
             return self._handle_tool_result(ev)
+        if ev.type == EventType.task_notification:
+            return self._handle_task_notification(ev)
         if ev.type == EventType.user_message:
             # Events originating from a subagent JSONL file carry a
             # subagent_uuid — these are the initial prompt the main
@@ -325,9 +331,7 @@ class CallGraph:
         if not isinstance(inp, dict):
             return False
         if tool in ("Agent", "Task"):
-            raw_name = inp.get("subagent_type")
-            if not raw_name:
-                return False
+            raw_name = inp.get("subagent_type") or "general-purpose"
             child_name = _sanitize_label(str(raw_name))
             if not child_name:
                 return False
@@ -419,9 +423,15 @@ class CallGraph:
                     node_type=ntype,
                     started_ts=ts_epoch,
                     turn_index=self._current_turn_index,
+                    is_background=bool(inp.get("run_in_background")),
                 )
                 self._flow_history.append(rec)
                 self._flow_tid_to_index[tid] = len(self._flow_history) - 1
+                # Apply any pending task-notification that arrived before
+                # this tool_use (race condition in JSONL write order).
+                pending = self._pending_task_notifications.pop(tid, None)
+                if pending is not None:
+                    self._apply_task_notification(tid, pending)
 
         return changed
 
@@ -484,6 +494,62 @@ class CallGraph:
                 rec.status = new_status
                 changed = True
         return changed
+
+    def _handle_task_notification(self, ev: HarnessEvent) -> bool:
+        """Update FlowRecord from a background agent's task-notification.
+
+        Claude Code writes a queue-operation (enqueue) JSONL row when a
+        background agent completes. The parser extracts tool_use_id,
+        status, and duration_ms from the embedded XML. We use these to
+        overwrite the instant-ack ended_ts with the real completion time
+        so fork/join detection works correctly for parallel agents.
+
+        Race condition: the queue-operation row may appear in the JSONL
+        *before* the assistant row containing the tool_use (different
+        writers). When the FlowRecord doesn't exist yet, we stash the
+        payload in ``_pending_task_notifications`` and apply it later
+        when ``_handle_tool_use`` creates the record.
+        """
+        tid = ev.tool_use_id
+        if not tid:
+            return False
+        flow_idx = self._flow_tid_to_index.get(tid)
+        if flow_idx is None or flow_idx >= len(self._flow_history):
+            # FlowRecord not created yet — stash for later.
+            self._pending_task_notifications[tid] = dict(ev.payload)
+            return False
+        return self._apply_task_notification(tid, ev.payload)
+
+    def _apply_task_notification(
+        self, tid: str, payload: dict,
+    ) -> bool:
+        """Apply task-notification data to an existing FlowRecord."""
+        flow_idx = self._flow_tid_to_index.get(tid)
+        if flow_idx is None or flow_idx >= len(self._flow_history):
+            return False
+        rec = self._flow_history[flow_idx]
+        duration_ms = payload.get("duration_ms")
+        if not isinstance(duration_ms, (int, float)) or duration_ms <= 0:
+            return False
+        # Compute real ended_ts from started_ts + actual duration.
+        real_ended = rec.started_ts + (duration_ms / 1000.0)
+        rec.ended_ts = real_ended
+        status_str = payload.get("status", "")
+        if status_str == "completed":
+            rec.status = "done"
+        elif status_str in ("error", "failed"):
+            rec.status = "error"
+        # Also update the Instance if it still exists (live session).
+        node = self.nodes.get(rec.node_id)
+        if node is not None:
+            inst = node._instances.get(tid)
+            if inst is not None:
+                inst.ended_ts = real_ended
+                if status_str == "completed":
+                    inst.status = "done"
+                elif status_str in ("error", "failed"):
+                    inst.status = "error"
+        return True
 
     def _handle_subagent_tool_use(self, ev: HarnessEvent) -> bool:
         """Route an internal tool_use event from a subagent file.
@@ -567,9 +633,7 @@ class CallGraph:
         if not isinstance(inp, dict):
             return False
         if tool in ("Agent", "Task"):
-            raw_name = inp.get("subagent_type")
-            if not raw_name:
-                return False
+            raw_name = inp.get("subagent_type") or "general-purpose"
             child_name = _sanitize_label(str(raw_name))
             if not child_name:
                 return False

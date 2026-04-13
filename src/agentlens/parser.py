@@ -53,12 +53,20 @@ def _extract_linked_subagent_uuid(content: Any) -> str | None:
                         return m.group(1)
     return None
 
+_TASK_NOTIFICATION_RE = re.compile(
+    r"<tool-use-id>([^<]+)</tool-use-id>"
+    r".*?<status>([^<]+)</status>"
+    r".*?<duration_ms>(\d+)</duration_ms>",
+    re.DOTALL,
+)
+
 SUPPORTED_TOP_TYPES = {
     "assistant",
     "user",
     "file-history-snapshot",
     "attachment",
     "permission-mode",
+    "queue-operation",
 }
 SUPPORTED_CONTENT_TYPES = {"text", "thinking", "tool_use", "tool_result"}
 
@@ -190,6 +198,27 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 raw_line=_truncate(line),
             )
         ]
+
+    if top_type == "queue-operation":
+        op = obj.get("operation")
+        content_str = obj.get("content")
+        if op == "enqueue" and isinstance(content_str, str):
+            m = _TASK_NOTIFICATION_RE.search(content_str)
+            if m:
+                return [
+                    HarnessEvent(
+                        type=EventType.task_notification,
+                        ts=ts,
+                        agent_id=agent_id,
+                        payload={
+                            "tool_use_id": m.group(1),
+                            "status": m.group(2),
+                            "duration_ms": int(m.group(3)),
+                        },
+                        raw_line=_truncate(line),
+                    )
+                ]
+        return []
 
     # assistant / user rows: explode content[] blocks into events.
     blocks = _content_blocks(obj)

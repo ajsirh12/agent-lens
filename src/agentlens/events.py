@@ -22,6 +22,7 @@ class EventType(str, Enum):
     agent_status = "agent_status"
     file_history_snapshot = "file_history_snapshot"
     attachment = "attachment"
+    task_notification = "task_notification"
     permission_mode = "permission_mode"
     unknown = "unknown"
 

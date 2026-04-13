@@ -468,3 +468,81 @@ def test_skill_events_produce_flow_records() -> None:
     assert rec.node_type == "skill"
     assert rec.status == "done"
     assert rec.ended_ts is not None
+
+
+# -------------------------------------------------------------------
+# 17. Instant tool_result acks don't break fork detection
+# -------------------------------------------------------------------
+def test_instant_ack_does_not_break_fork_detection() -> None:
+    """Background agents get an instant tool_result ack (~0.003s) before
+    the real work starts. These sub-0.5s completions must NOT count as
+    'completed predecessors', otherwise parallel spawns chain linearly
+    instead of forking from the same parent."""
+    panel = FlowchartPanel()
+    g = panel._graph
+
+    # A completes with an instant ack (0.003s duration).
+    g.update_from_event(_agent_use("alpha", tid="tA"))
+    g.update_from_event(_result("tA"))
+
+    # B and C spawn right after A's ack — they are truly parallel.
+    g.update_from_event(_agent_use("beta", tid="tB"))
+    g.update_from_event(_agent_use("gamma", tid="tC"))
+
+    # A: instant ack (0.003s) — should NOT count as completed.
+    _set_flow_timestamps(g, "tA", started=0.0, ended=0.003, status="done")
+    # B and C: real parallel work.
+    _set_flow_timestamps(g, "tB", started=0.1, ended=8.0, status="done")
+    _set_flow_timestamps(g, "tC", started=0.1, ended=12.0, status="done")
+
+    sub = panel._flow_subgraph()
+
+    parent_of = {cid: pid for (pid, cid) in sub.edges}
+
+    flow_ids = sorted(
+        [nid for nid in sub.nodes if nid != ROOT_ID],
+        key=lambda nid: sub.nodes[nid].last_ts,
+    )
+    assert len(flow_ids) == 3
+
+    # All three should fork from ROOT because A's instant ack
+    # doesn't count as a real completion.
+    for vid in flow_ids:
+        assert parent_of[vid] == ROOT_ID, (
+            f"{vid} should connect to ROOT but connects to {parent_of[vid]}"
+        )
+
+
+# -------------------------------------------------------------------
+# 18. Real completion (>= 0.5s) creates sequential chain
+# -------------------------------------------------------------------
+def test_real_completion_creates_sequential_chain() -> None:
+    """When an agent completes with >= 0.5s duration, the next spawn
+    should chain from it (not fork from ROOT)."""
+    panel = FlowchartPanel()
+    g = panel._graph
+
+    g.update_from_event(_agent_use("alpha", tid="tA"))
+    g.update_from_event(_result("tA"))
+    g.update_from_event(_agent_use("beta", tid="tB"))
+
+    # A: real work (5s duration) — qualifies as completed.
+    _set_flow_timestamps(g, "tA", started=0.0, ended=5.0, status="done")
+    # B: starts after A finished.
+    _set_flow_timestamps(g, "tB", started=6.0, ended=10.0, status="done")
+
+    sub = panel._flow_subgraph()
+
+    parent_of = {cid: pid for (pid, cid) in sub.edges}
+
+    flow_ids = sorted(
+        [nid for nid in sub.nodes if nid != ROOT_ID],
+        key=lambda nid: sub.nodes[nid].last_ts,
+    )
+    assert len(flow_ids) == 2
+    vid_a, vid_b = flow_ids
+
+    # A chains from ROOT.
+    assert parent_of[vid_a] == ROOT_ID
+    # B chains from A (A completed with real duration before B started).
+    assert parent_of[vid_b] == vid_a
