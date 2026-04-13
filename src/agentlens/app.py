@@ -538,6 +538,13 @@ class AgentlensApp(App[int]):
 
     # --- turn navigation actions ------------------------------------------
 
+    def _propagate_turn_to_flowchart(self) -> None:
+        """Push the current _active_turn to the flowchart and recompute."""
+        if self._flowchart is not None:
+            self._flowchart._active_turn = self._active_turn
+            self._flowchart._layout = self._flowchart._compute_layout()
+            self._flowchart._refresh_canvas()
+
     def action_prev_turn(self) -> None:
         """Navigate to the previous turn."""
         if self._flowchart is None:
@@ -549,6 +556,7 @@ class AgentlensApp(App[int]):
             self._active_turn = max(0, len(turns) - 2)
         elif self._active_turn > 0:
             self._active_turn -= 1
+        self._propagate_turn_to_flowchart()
         self._update_footer()
         self._scroll_timeline_to_active_turn()
 
@@ -565,12 +573,14 @@ class AgentlensApp(App[int]):
             self._active_turn = None
         else:
             self._active_turn += 1
+        self._propagate_turn_to_flowchart()
         self._update_footer()
         self._scroll_timeline_to_active_turn()
 
     def action_live_turn(self) -> None:
         """Jump to LIVE (current turn)."""
         self._active_turn = None
+        self._propagate_turn_to_flowchart()
         self._update_footer()
         if self._timeline is not None:
             self._timeline.scroll_to_end_live()

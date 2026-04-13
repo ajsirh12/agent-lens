@@ -108,6 +108,7 @@ class FlowchartPanel(ScrollableContainer):
         self._virtual_to_tid: dict[str, str] = {}
         self._selected_tool_use_id: str | None = None
         self._selected_flow_vid: str | None = None
+        self._active_turn: int | None = None
         self._layout: LayoutResult = self._compute_layout()
         self._canvas: Static | None = None
         self._updating = False
@@ -139,14 +140,15 @@ class FlowchartPanel(ScrollableContainer):
         self._virtual_to_tid = {}
         self._selected_tool_use_id = None
         self._selected_flow_vid = None
+        self._active_turn = None
         self._layout = self._compute_layout()
         self._refresh_canvas()
 
     def get_node_count(self) -> int:
-        return len(self._graph.nodes)
+        return len(self._layout.nodes)
 
     def get_edge_count(self) -> int:
-        return len(self._graph.edges)
+        return len(self._layout.edges)
 
     def get_orientation(self) -> Orientation:
         return self._orientation
@@ -175,10 +177,14 @@ class FlowchartPanel(ScrollableContainer):
     def _compute_layout(self) -> LayoutResult:
         """Filter the graph by current mode, then lay it out."""
         graph = self._graph
-        if self._mode == "running":
+        if self._mode == "all":
+            if self._active_turn is not None:
+                graph = self._all_subgraph()
+            # else: use self._graph as-is (current behavior)
+        elif self._mode == "running":
             graph = self._running_subgraph()
         elif self._mode == "flow":
-            graph = self._flow_subgraph()
+            graph = self._flow_subgraph()  # handles _active_turn internally
         if self._orientation == "leftright":
             return layout_leftright(graph)
         return layout_topdown(graph)
@@ -272,12 +278,23 @@ class FlowchartPanel(ScrollableContainer):
 
         Unlike the old Instance-based approach, FlowRecords survive
         user_message flushes so the full session history is preserved.
+
+        When ``self._active_turn`` is set, only FlowRecords matching
+        that turn_index are included. The ``completed`` predecessor
+        list operates only on the filtered subset to prevent cross-turn
+        edges.
         """
         sub = CallGraph()
 
         history = self._graph._flow_history
         if not history:
             return sub
+
+        # Optionally filter by turn.
+        if self._active_turn is not None:
+            history = [r for r in history if r.turn_index == self._active_turn]
+            if not history:
+                return sub
 
         # Track completed nodes in chronological order of their end time.
         # Each entry: (ended_ts, vid). Kept sorted by ended_ts.
@@ -314,6 +331,36 @@ class FlowchartPanel(ScrollableContainer):
 
         return sub
 
+    def _all_subgraph(self) -> CallGraph:
+        """Return a CallGraph filtered to nodes active in ``_active_turn``.
+
+        Only nodes whose canonical id appears in ``get_nodes_for_turn()``
+        (plus ROOT_ID) survive. Edges whose source is outside the
+        surviving set are re-parented to ROOT_ID so the child stays
+        visible. Mirrors the re-parenting pattern of ``_running_subgraph``.
+        """
+        turn = self._active_turn
+        if turn is None:
+            return self._graph
+
+        keep_ids = self._graph.get_nodes_for_turn(turn)
+        keep_ids.add(ROOT_ID)
+
+        sub = CallGraph()
+        for nid, node in self._graph.nodes.items():
+            if nid in keep_ids:
+                sub.nodes[nid] = node
+
+        for (pid, cid), edge in self._graph.edges.items():
+            if cid not in keep_ids:
+                continue
+            src = pid if pid in keep_ids else ROOT_ID
+            sub.edges[(src, cid)] = Edge(
+                parent_id=src, child_id=cid, count=edge.count,
+            )
+
+        return sub
+
     @staticmethod
     def _base_node_id(nid: str | None) -> str | None:
         """Strip the ``#<tid>`` or ``@<seq>`` suffix added to virtual nodes.
@@ -336,6 +383,21 @@ class FlowchartPanel(ScrollableContainer):
         if self._canvas is None:
             return
         self._canvas.update(self._render_text())
+        # Update border color and title based on turn filter state.
+        if self._active_turn is not None:
+            turns = self._graph.get_turns()
+            total = len(turns)
+            try:
+                self.styles.border = ("solid", "yellow")
+            except Exception:
+                pass
+            self.border_title = f"Turn {self._active_turn + 1}/{total}"
+        else:
+            try:
+                self.styles.border = ("solid", "$accent")
+            except Exception:
+                pass
+            self.border_title = ""
         # Force re-layout so the Container re-measures its child's size when
         # the flowchart grows beyond its initial canvas dimensions. Without
         # this, Static.update() replaces the content but Textual keeps the
@@ -373,6 +435,21 @@ class FlowchartPanel(ScrollableContainer):
                 if pr == r and pc != c:
                     if 0 <= r < h and 0 <= c < w:
                         grid[r][c] = ("─", "")
+
+        # Empty turn placeholder: when filtered to a turn with no tool
+        # calls, the layout has only the root node and no edges. Show a
+        # dimmed hint so the user knows the turn is empty, not broken.
+        if (
+            self._active_turn is not None
+            and len(layout.nodes) <= 1
+            and len(layout.edges) == 0
+        ):
+            placeholder = "(no tool calls in this turn)"
+            row = 6  # below root box
+            col = max(0, (w - len(placeholder)) // 2)
+            for i, ch in enumerate(placeholder):
+                if col + i < w and row < h:
+                    grid[row][col + i] = (ch, "dim")
 
         # Draw node boxes.
         selected = None

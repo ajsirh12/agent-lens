@@ -688,6 +688,20 @@ class CallGraph:
 
         return depths
 
+    def get_flow_records_for_turn(self, turn_index: int) -> list[FlowRecord]:
+        """Return FlowRecords belonging to a specific turn. Never raises."""
+        try:
+            return [r for r in self._flow_history if r.turn_index == turn_index]
+        except Exception:
+            return []
+
+    def get_nodes_for_turn(self, turn_index: int) -> set[str]:
+        """Return node_ids that have FlowRecords in the given turn. Never raises."""
+        try:
+            return {r.node_id for r in self._flow_history if r.turn_index == turn_index}
+        except Exception:
+            return set()
+
     def _compute_depths(self) -> dict[str, int]:
         """Back-compat alias for compute_depths()."""
         return self.compute_depths()
