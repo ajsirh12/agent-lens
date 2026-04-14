@@ -454,3 +454,200 @@ def test__unknown_subagent_drop() -> None:
     # Main turn totals must remain zero — nothing was accumulated.
     s = g.get_turn_summary(0)
     assert s["token_total"]["input"] == 0
+
+
+# --- Subagent token breakdown (skill-tree / standalone) ---
+
+
+def _tool_result_linked(tid: str, linked_uuid: str) -> HarnessEvent:
+    """tool_result that links an Agent node to its subagent JSONL UUID."""
+    return HarnessEvent(
+        type=EventType.tool_result,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_use_id": tid, "is_error": False,
+                 "linked_subagent_uuid": linked_uuid},
+    )
+
+
+def _subagent_usage(subagent_uuid: str, usage: dict) -> HarnessEvent:
+    """Simulates an assistant_message row from a subagent JSONL file."""
+    return HarnessEvent(
+        type=EventType.assistant_message,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"usage": usage, "subagent_uuid": subagent_uuid},
+    )
+
+
+def _make_usage(inp: int = 100, out: int = 40) -> dict:
+    return {
+        "input_tokens": inp,
+        "output_tokens": out,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
+
+
+def test_t_a1_agent_in_skill_span_records_agent_to_skill() -> None:
+    """T-A1: Agent spawned while a skill span is open → _agent_to_skill mapped."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+
+    # Open a skill span.
+    skill_ev = HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_name": "Skill", "tool_use_id": "sk1", "input": {"skill": "ralplan"}},
+    )
+    g.update_from_event(skill_ev)
+
+    # Spawn an agent while the skill span is open.
+    g.update_from_event(_task_use("executor", tid="t1"))
+
+    # _agent_to_skill must link the agent to the skill node.
+    assert "agent:executor" in g._agent_to_skill
+    assert g._agent_to_skill["agent:executor"] == "skill:ralplan"
+
+
+def test_t_a2_agent_outside_skill_span_not_mapped() -> None:
+    """T-A2: Agent spawned outside any skill span → not in _agent_to_skill."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+
+    # Spawn agent — no skill span open.
+    g.update_from_event(_task_use("planner", tid="t1"))
+
+    assert "agent:planner" not in g._agent_to_skill
+
+
+def test_t_a3_subagent_usage_in_skill_span_goes_to_skill_tree() -> None:
+    """T-A3: Subagent that was spawned inside a skill span → skill_tree bucket."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+
+    # Open skill span.
+    g.update_from_event(HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_name": "Skill", "tool_use_id": "sk1", "input": {"skill": "myskill"}},
+    ))
+
+    # Spawn agent inside skill span.
+    g.update_from_event(_task_use("worker", tid="t1"))
+
+    # Link agent node to a subagent JSONL UUID via tool_result.
+    g.update_from_event(_tool_result_linked("t1", linked_uuid="uuid-worker-1"))
+
+    # Close skill span.
+    g.update_from_event(_result("sk1"))
+
+    # Subagent usage arrives asynchronously.
+    g.update_from_event(_subagent_usage("uuid-worker-1", _make_usage(inp=200, out=80)))
+
+    s = g.get_turn_summary(0)
+    skill_tree = s["token_skill_tree"]
+    assert len(skill_tree) == 1
+    entry = skill_tree[0]
+    assert entry["label"] == "myskill"
+    agents_in_skill = entry["agents"]
+    assert len(agents_in_skill) == 1
+    assert agents_in_skill[0]["label"] == "worker"
+    assert agents_in_skill[0]["tokens"]["input"] == 200
+    assert agents_in_skill[0]["tokens"]["output"] == 80
+
+
+def test_t_a4_subagent_usage_outside_skill_span_goes_to_standalone() -> None:
+    """T-A4: Subagent spawned outside any skill span → standalone bucket."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+
+    # Spawn agent outside any skill span.
+    g.update_from_event(_task_use("lone-worker", tid="t1"))
+    g.update_from_event(_tool_result_linked("t1", linked_uuid="uuid-lone-1"))
+
+    # Subagent usage arrives.
+    g.update_from_event(_subagent_usage("uuid-lone-1", _make_usage(inp=150, out=50)))
+
+    s = g.get_turn_summary(0)
+    standalone = s["token_agents_standalone"]
+    assert len(standalone) == 1
+    assert standalone[0]["label"] == "lone-worker"
+    assert standalone[0]["tokens"]["input"] == 150
+    assert standalone[0]["tokens"]["output"] == 50
+
+    # skill_tree must be empty.
+    assert s["token_skill_tree"] == []
+
+
+def test_t_a5_skill_tree_total_not_in_token_total() -> None:
+    """T-A5: skill_tree aggregate is display-only — not double-counted in token_total."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+
+    # Open skill span.
+    g.update_from_event(HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_name": "Skill", "tool_use_id": "sk1", "input": {"skill": "myskill"}},
+    ))
+
+    # Spawn agent inside skill span.
+    g.update_from_event(_task_use("worker", tid="t1"))
+    g.update_from_event(_tool_result_linked("t1", linked_uuid="uuid-w1"))
+
+    # Close skill span.
+    g.update_from_event(_result("sk1"))
+
+    # Subagent sends 300 input tokens.
+    g.update_from_event(_subagent_usage("uuid-w1", _make_usage(inp=300, out=100)))
+
+    s = g.get_turn_summary(0)
+    # token_total should be exactly the subagent's usage — no double count.
+    assert s["token_total"]["input"] == 300
+    assert s["token_total"]["output"] == 100
+
+    # skill_tree's total bucket for the skill shows the same amount.
+    skill_tree = s["token_skill_tree"]
+    assert len(skill_tree) == 1
+    tree_total = skill_tree[0]["total"]["tokens"]
+    assert tree_total["input"] == 300  # display-only aggregate, equal but not additive
+
+
+def test_t_a6_agent_to_skill_survives_turn_boundary() -> None:
+    """T-A6: _agent_to_skill is NOT cleared on turn boundary (session-lifetime map)."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+
+    # Open skill span, spawn agent, link.
+    g.update_from_event(HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_name": "Skill", "tool_use_id": "sk1", "input": {"skill": "mypipeline"}},
+    ))
+    g.update_from_event(_task_use("subworker", tid="t1"))
+    g.update_from_event(_result("t1"))
+    g.update_from_event(_result("sk1"))
+
+    # Flush to turn 1.
+    g.update_from_event(_user_message())
+
+    # _agent_to_skill mapping must still be present after turn flush.
+    assert "agent:subworker" in g._agent_to_skill
+    assert g._agent_to_skill["agent:subworker"] == "skill:mypipeline"
+
+
+def test_t_a7_get_turn_summary_contains_new_keys() -> None:
+    """T-A7: get_turn_summary() always includes token_skill_tree and token_agents_standalone keys."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+    s = g.get_turn_summary(0)
+    assert "token_skill_tree" in s
+    assert "token_agents_standalone" in s
+    # Empty turn → both are empty lists.
+    assert s["token_skill_tree"] == []
+    assert s["token_agents_standalone"] == []

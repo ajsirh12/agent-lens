@@ -232,19 +232,33 @@ Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트
 ### Turn Summary 모달 (v0.7.0+)
 
 Turn marker (Timeline 상의 `▶` user_message row) 에 Enter 를 누르면 **Turn Summary 모달** 이 표시됩니다.
-이 모달은 해당 turn 에서 실행된 Agents/Skills 과 하단의 3개 신규 섹션을 보여줍니다:
+이 모달은 해당 turn 에서 실행된 Agents/Skills 과 하단의 4개 신규 섹션을 보여줍니다:
 
 **섹션 표시 순서:**
 1. Agents/Skills (기존)
-2. **Tool Usage** — 이 turn 에서 호출된 tool 들 (Read, Edit, Bash 등)
+2. **Token Usage** (v0.9.0+) — LLM 토큰 소비 분해 (새로움)
+   - `Total` — 이 turn 의 전체 토큰 합계 (bold)
+   - `main` — 메인 세션 어시스턴트만 (subagent 제외)
+   - **Skill Hierarchy** — skill span 내 spawned 에이전트의 토큰 (있을 때)
+     - `[skill] {name}` — skill node 라벨 + 누적 토큰
+       - `    [agent] {name}` — 해당 skill 내 subagent (들여쓰기 4칸)
+       - 상위 5개 skill, 상위 8개 per-skill agent
+       - 초과분: `... +N more skills`, `... +N more agents`
+   - **Agents** — standalone agent (skill 밖 독립 spawn)
+     - `agents (N)` — 소계 헤더 (2개 이상일 때, dim)
+     - `  {name:<22}` — 각 agent 라벨 + 토큰 (들여쓰기 2칸)
+     - 상위 8개, 초과분: `... +N more agents`
+   - 토큰이 0 인 행은 제외
+   - 기존 `token_nodes` 데이터만 있으면 자동 fallback (legacy mode)
+3. **Tool Usage** — 이 turn 에서 호출된 tool 들 (Read, Edit, Bash 등)
    - 상위 8개를 count 내림차순, 이름 오름차순으로 정렬
    - 초과분: `... +N more`
    - 형식: `  {name:<14} ×{count}`
-3. **MCP** — MCP 프로토콜을 통한 외부 tool 호출 (v0.7.0+)
+4. **MCP** — MCP 프로토콜을 통한 외부 tool 호출 (v0.7.0+)
    - 상위 6개를 count 내림차순으로 정렬
    - 형식: `  {server·tool:<38} ×{count}` (U+00B7 separator)
    - 초과분: `... +N more`
-4. **Hooks** — hook script 실행 요약 (v0.7.0+)
+5. **Hooks** — hook script 실행 요약 (v0.7.0+)
    - Hook script 가 설정되어 있으면 표시 (`.claude/settings.json` 탐지)
    - Hook 이 발생하지 않은 경우: `[dim](no hook fired this turn)[/dim]`
    - Hook 이 발생한 경우: 상위 5개 script (count 내림차순, total_ms 내림차순 tiebreaker)
@@ -258,6 +272,17 @@ Turn Summary — turn 2/3
 
 Agents/Skills
   oh-my-claudecode:executor (x2)
+
+Token Usage
+  Total          3500 tokens
+  main           1200 tokens
+  
+  [skill] plan          1450 tokens
+      [agent] executor  800 tokens
+      [agent] reviewer  650 tokens
+  
+  agents (1)
+    standalone-critic    850 tokens
 
 Tool Usage
   Read         ×8

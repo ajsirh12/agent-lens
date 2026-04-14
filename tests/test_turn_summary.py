@@ -591,3 +591,149 @@ def test__token_sort_order() -> None:
     pos_medium = combined.index("medium")
     pos_small = combined.index("small")
     assert pos_large < pos_medium < pos_small
+
+
+# --- Skill-tree / standalone subagent token section (T-B tests) ---
+
+
+def _skill_tree_summary(
+    token_skill_tree: list | None = None,
+    token_agents_standalone: list | None = None,
+    token_total: dict | None = None,
+) -> dict:
+    """Build a summary dict that includes the new hierarchical token keys."""
+    return {
+        "index": 0,
+        "prompt": "",
+        "duration_s": 1.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "total_agent_duration_s": 0.0,
+        "end_ts": 1.0,
+        "agents": [],
+        "tool_usage": [],
+        "tool_total": 0,
+        "mcp_usage": [],
+        "mcp_total": 0,
+        "hook_usage": [],
+        "hook_runs": 0,
+        "hook_errors_total": 0,
+        "hook_duration_ms": 0,
+        "hooks_configured": False,
+        "token_total": token_total or {
+            "input": 300, "output": 100, "cache_read": 0, "cache_create": 0
+        },
+        "token_main": {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0},
+        "token_nodes": [],
+        "token_skill_tree": token_skill_tree if token_skill_tree is not None else [],
+        "token_agents_standalone": (
+            token_agents_standalone if token_agents_standalone is not None else []
+        ),
+    }
+
+
+def test_t_b1_skill_tree_and_standalone_sections_render() -> None:
+    """T-B1: When token_skill_tree and token_agents_standalone have data, sections render."""
+    summary = _skill_tree_summary(
+        token_skill_tree=[
+            {
+                "skill_node_id": "skill:ralplan",
+                "label": "ralplan",
+                "total": {"tokens": {"input": 200, "output": 80, "cache_read": 0, "cache_create": 0}},
+                "agents": [
+                    {
+                        "node_id": "agent:executor",
+                        "label": "executor",
+                        "tokens": {"input": 200, "output": 80, "cache_read": 0, "cache_create": 0},
+                    }
+                ],
+            }
+        ],
+        token_agents_standalone=[
+            {
+                "node_id": "agent:planner",
+                "label": "planner",
+                "tokens": {"input": 100, "output": 20, "cache_read": 0, "cache_create": 0},
+            }
+        ],
+    )
+    combined = _combined(summary)
+    # Skill section renders the skill label.
+    assert "ralplan" in combined
+    # Standalone section renders the agent label.
+    assert "planner" in combined
+    # Token Usage section header present.
+    assert "Token Usage" in combined
+
+
+def test_t_b2_skill_subagent_indented_4_spaces() -> None:
+    """T-B2: Agent under a skill is indented at 4-space level (indent=4)."""
+    summary = _skill_tree_summary(
+        token_skill_tree=[
+            {
+                "skill_node_id": "skill:pipeline",
+                "label": "pipeline",
+                "total": {"tokens": {"input": 500, "output": 150, "cache_read": 0, "cache_create": 0}},
+                "agents": [
+                    {
+                        "node_id": "agent:childagent",
+                        "label": "childagent",
+                        "tokens": {"input": 500, "output": 150, "cache_read": 0, "cache_create": 0},
+                    }
+                ],
+            }
+        ],
+    )
+    lines = _build_lines(summary)
+    # Find the line that mentions "childagent".
+    child_lines = [ln for ln in lines if "childagent" in ln]
+    assert len(child_lines) == 1, f"expected exactly 1 childagent line, got: {child_lines}"
+    child_line = child_lines[0]
+    # The line should start with at least 4 spaces of indentation.
+    assert child_line.startswith("    "), (
+        f"expected 4-space indent, got: {repr(child_line)}"
+    )
+
+
+def test_t_b3_token_total_does_not_include_skill_tree_total() -> None:
+    """T-B3: Total row shows token_total, which must not double-count skill_tree totals."""
+    # token_total = 300 (the agent's usage). skill_tree total also = 300.
+    # If there were double-counting, Total would show 600.
+    summary = _skill_tree_summary(
+        token_skill_tree=[
+            {
+                "skill_node_id": "skill:myskill",
+                "label": "myskill",
+                "total": {"tokens": {"input": 300, "output": 100, "cache_read": 0, "cache_create": 0}},
+                "agents": [
+                    {
+                        "node_id": "agent:worker",
+                        "label": "worker",
+                        "tokens": {"input": 300, "output": 100, "cache_read": 0, "cache_create": 0},
+                    }
+                ],
+            }
+        ],
+        token_total={"input": 300, "output": 100, "cache_read": 0, "cache_create": 0},
+    )
+    combined = _combined(summary)
+    # The Total row must not show 600 (which would indicate double-counting).
+    # 300 in, 100 out → rendered as "300" and "100" (< 1k threshold).
+    assert "600" not in combined
+
+
+def test_t_b4_missing_skill_tree_keys_falls_back_silently() -> None:
+    """T-B4: When token_skill_tree and token_agents_standalone are absent, fallback to legacy (no crash)."""
+    # Use _token_summary which does NOT include the new keys.
+    summary = _token_summary(
+        token_total={"input": 100, "output": 50, "cache_read": 0, "cache_create": 0},
+        token_nodes=[
+            {"label": "someagent", "node_type": "agent",
+             "tokens": {"input": 100, "output": 50, "cache_read": 0, "cache_create": 0}}
+        ],
+    )
+    # Must not raise; must still render Token Usage with legacy node.
+    combined = _combined(summary)
+    assert "Token Usage" in combined
+    assert "someagent" in combined

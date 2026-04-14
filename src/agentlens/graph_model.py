@@ -62,6 +62,23 @@ class TurnRecord:
     # value = {"label": str, "node_type": "agent"|"skill",
     #          "tokens": {"input","output","cache_read","cache_create"}}
     token_nodes: dict = field(default_factory=dict)
+    # Hierarchical skill → agent token tree (C안 / rev2).
+    # key = skill_node_id,
+    # value = {
+    #   "label": str,
+    #   "total": {"tokens": {input,output,cache_read,cache_create}},
+    #   "agents": {
+    #     agent_node_id: {"label": str, "tokens": {...}},
+    #   },
+    # }
+    # The "total" bucket is a display-only sum (main skill body + all
+    # child agents); it is NOT added to token_total to avoid double
+    # counting (FR-5 / AC-4). Skill-body main usage continues to flow to
+    # token_main per §5.4 of the design spec.
+    token_skill_tree: dict = field(default_factory=dict)
+    # Flat bucket for agents spawned outside any skill span.
+    # key = agent_node_id, value = {"label": str, "tokens": {...}}
+    token_agents_standalone: dict = field(default_factory=dict)
 
 ROOT_ID = "main"
 
@@ -253,6 +270,14 @@ class CallGraph:
     # Pending task-notification payloads for background agents whose
     # queue-operation row arrived before the assistant tool_use row.
     _pending_task_notifications: dict[str, dict] = field(default_factory=dict)
+    # Session-lifetime snapshot: agent_node_id → skill_node_id, captured
+    # at subagent spawn time when an active skill span is open. Enables
+    # correct hierarchical attribution of asynchronously-arriving
+    # subagent token usage to the originating skill even after the
+    # skill span has closed (FR-3 / AC-5). NOT cleared on turn
+    # boundaries — only on session switch (clear_turns currently keeps
+    # this map; full session reset is external).
+    _agent_to_skill: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._turns: list[TurnRecord] = []
@@ -455,6 +480,22 @@ class CallGraph:
         # be kept visually "running" until the next user_message clears
         # the turn set.
         self._current_turn.add(child_id)
+
+        # Snapshot skill→agent link at spawn time (FR-3 / AC-5).
+        # Only agent spawns need this; a skill child is never attributed
+        # under itself. Captured here regardless of parent-is-skill so
+        # that any open skill span on the main session inherits.
+        if ntype == "agent":
+            try:
+                if self._current_turn_index >= 0:
+                    _turn = self._turns[self._current_turn_index]
+                    active_skill = self._find_active_skill_span(
+                        _turn, ts_epoch
+                    )
+                    if active_skill is not None:
+                        self._agent_to_skill[child_id] = active_skill.node_id
+            except Exception:
+                pass  # never-raise
 
         edge_key = (parent_id, child_id)
         if edge_key in self.edges:
@@ -753,6 +794,22 @@ class CallGraph:
 
         self._current_turn.add(child_id)
 
+        # Snapshot skill→agent link at nested spawn time (FR-3 / AC-5).
+        # Mirrors the top-level spawn path: only agent children inherit
+        # an enclosing skill span; skill children never attribute under
+        # themselves.
+        if ntype == "agent":
+            try:
+                if self._current_turn_index >= 0:
+                    _turn = self._turns[self._current_turn_index]
+                    active_skill = self._find_active_skill_span(
+                        _turn, ts_epoch
+                    )
+                    if active_skill is not None:
+                        self._agent_to_skill[child_id] = active_skill.node_id
+            except Exception:
+                pass  # never-raise
+
         edge_key = (parent_id, child_id)
         if edge_key in self.edges:
             self.edges[edge_key].count += 1
@@ -1034,6 +1091,46 @@ class CallGraph:
                     ]
                     if turn is not None else []
                 ),
+                # Hierarchical token views (rev2 / D-15). Additive —
+                # existing consumers keep reading the legacy keys.
+                "token_skill_tree": (
+                    [
+                        {
+                            "skill_node_id": skill_id,
+                            "label": entry.get("label", ""),
+                            "total": {
+                                "tokens": dict(
+                                    entry.get("total", {}).get("tokens", {})
+                                ),
+                            },
+                            "agents": [
+                                {
+                                    "node_id": a_id,
+                                    "label": a_entry.get("label", ""),
+                                    "tokens": dict(
+                                        a_entry.get("tokens", {})
+                                    ),
+                                }
+                                for a_id, a_entry in (
+                                    entry.get("agents", {}) or {}
+                                ).items()
+                            ],
+                        }
+                        for skill_id, entry in turn.token_skill_tree.items()
+                    ]
+                    if turn is not None else []
+                ),
+                "token_agents_standalone": (
+                    [
+                        {
+                            "node_id": nid,
+                            "label": entry.get("label", ""),
+                            "tokens": dict(entry.get("tokens", {})),
+                        }
+                        for nid, entry in turn.token_agents_standalone.items()
+                    ]
+                    if turn is not None else []
+                ),
             }
         except Exception:
             return {
@@ -1071,6 +1168,8 @@ class CallGraph:
                     "cache_read": 0, "cache_create": 0,
                 },
                 "token_nodes": [],
+                "token_skill_tree": [],
+                "token_agents_standalone": [],
             }
 
     # ------------------------------------------------------------------
@@ -1259,6 +1358,89 @@ class CallGraph:
             turn.token_nodes[node_id] = entry
         self._accumulate_tokens(entry["tokens"], usage)
 
+    def _accumulate_skill_tree(
+        self,
+        turn: TurnRecord,
+        skill_node_id: str,
+        agent_node_id: str,
+        usage: dict,
+    ) -> None:
+        """Accumulate subagent usage into the hierarchical skill tree
+        bucket. Creates the skill entry + agent sub-entry on first touch.
+
+        The ``total`` bucket is a display-only sum (skill body aggregate
+        is kept in ``token_main`` per §5.4, so ``total`` here represents
+        the sum of child-agent usage that UI renders on the skill row).
+
+        Never raises — bad input drops silently.
+        """
+        try:
+            skill_node = self.nodes.get(skill_node_id)
+            skill_label = (
+                skill_node.label if skill_node is not None else skill_node_id
+            )
+            agent_node = self.nodes.get(agent_node_id)
+            agent_label = (
+                agent_node.label if agent_node is not None else agent_node_id
+            )
+            skill_entry = turn.token_skill_tree.get(skill_node_id)
+            if skill_entry is None:
+                skill_entry = {
+                    "label": skill_label,
+                    "total": {
+                        "tokens": {
+                            "input": 0, "output": 0,
+                            "cache_read": 0, "cache_create": 0,
+                        },
+                    },
+                    "agents": {},
+                }
+                turn.token_skill_tree[skill_node_id] = skill_entry
+            # Display-only aggregate.
+            self._accumulate_tokens(skill_entry["total"]["tokens"], usage)
+            agents_map = skill_entry.setdefault("agents", {})
+            agent_entry = agents_map.get(agent_node_id)
+            if agent_entry is None:
+                agent_entry = {
+                    "label": agent_label,
+                    "tokens": {
+                        "input": 0, "output": 0,
+                        "cache_read": 0, "cache_create": 0,
+                    },
+                }
+                agents_map[agent_node_id] = agent_entry
+            self._accumulate_tokens(agent_entry["tokens"], usage)
+        except Exception:
+            return  # never-raise
+
+    def _accumulate_standalone_agent(
+        self,
+        turn: TurnRecord,
+        node_id: str,
+        usage: dict,
+    ) -> None:
+        """Accumulate subagent usage into the flat standalone-agent
+        bucket (no enclosing skill at spawn time).
+
+        Never raises.
+        """
+        try:
+            node = self.nodes.get(node_id)
+            label = node.label if node is not None else node_id
+            entry = turn.token_agents_standalone.get(node_id)
+            if entry is None:
+                entry = {
+                    "label": label,
+                    "tokens": {
+                        "input": 0, "output": 0,
+                        "cache_read": 0, "cache_create": 0,
+                    },
+                }
+                turn.token_agents_standalone[node_id] = entry
+            self._accumulate_tokens(entry["tokens"], usage)
+        except Exception:
+            return  # never-raise
+
     def _node_turn_index_for(self, node_id: str) -> int:
         """Return the turn_index of the first FlowRecord that spawned
         this node_id, or -1 if no record is found. Uses the existing
@@ -1334,6 +1516,22 @@ class CallGraph:
             self._accumulate_node(
                 turn, node_id, node.label, "agent", usage,
             )
+            # Hierarchical routing (rev2 / D-15). If this agent was
+            # spawned inside a skill span, attribute into the skill
+            # tree; otherwise into the standalone bucket. token_nodes
+            # above is kept as the legacy flat view (AC-1).
+            try:
+                skill_node_id = self._agent_to_skill.get(node_id)
+                if skill_node_id:
+                    self._accumulate_skill_tree(
+                        turn, skill_node_id, node_id, usage,
+                    )
+                else:
+                    self._accumulate_standalone_agent(
+                        turn, node_id, usage,
+                    )
+            except Exception:
+                pass  # never-raise
             return True
 
         # Main session path.

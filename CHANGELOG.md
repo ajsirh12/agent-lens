@@ -8,6 +8,42 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Turn Summary modal — Token Usage section enhanced with subagent/skill hierarchy**
+  - Skill-spawned subagents now display under their parent skill with indentation (4-space)
+  - Skill span label format: `[skill] name` with sumaggregate under `agents` sub-list
+  - Standalone agents (spawned outside skill context) display under separate `agents (N)` section
+  - Each agent attribution captured via `_agent_to_skill` snapshot map at spawn time, enabling
+    async token attribution even when subagent messages arrive across turn boundaries
+  - `Total` row calculated as leaf sum only (no double-counting): `token_main` + sum of standalone
+    agents + sum of all skill sub-agents = `token_total`
+
+### Changed
+
+- **`TurnRecord` dataclass** — two new fields:
+  - `token_skill_tree: dict` — skill node ID → skill label + total tokens + agents sub-list
+  - `token_agents_standalone: dict` — standalone agent ID → agent label + tokens
+- **`CallGraph` dataclass** — one new field:
+  - `_agent_to_skill: dict[str, str]` — snapshot map of agent_node_id → skill_node_id,
+    captured at spawn time. Session-scoped, unaffected by turn boundaries (supports async
+    token arrival across turns).
+- **`get_turn_summary()` return dict** (additive):
+  - Now includes `token_skill_tree` and `token_agents_standalone` alongside existing
+    `token_total`, `token_main`, `token_nodes` (for backward compatibility).
+  - Legacy fallback: if skill tree is empty, existing `token_nodes` list is returned
+    (no change for existing panel code).
+
+### Fixed
+
+- **Subagent token attribution in hierarchical context** — tokens for agents spawned
+  within skill spans now correctly route to the skill's sub-agent bucket instead of
+  top-level standings, preventing skill context loss.
+
+---
+
 ## [0.8.0] - 2026-04-14
 
 Turn Summary modal now shows Token Usage breakdown. Parser defensively

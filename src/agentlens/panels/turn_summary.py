@@ -18,7 +18,9 @@ from textual.widgets import Static
 _TOP_N_TOOL = 8
 _TOP_N_MCP = 6
 _TOP_N_HOOK = 5
-_TOP_N_TOKEN = 10
+_TOP_N_SKILL = 5
+_TOP_N_AGENT = 8
+_TOP_N_TOKEN = 10  # legacy token_nodes fallback
 
 
 def _sanitize(s: object) -> str:
@@ -78,18 +80,28 @@ def _fmt_tokens(n: int) -> str:
     return f"{n/1_000_000_000:.1f}B"
 
 
-def _fmt_token_row(label: str, tokens: dict, bold: bool = False) -> str:
-    label_trunc = _trunc(label, 22)
-    label_col = f"{label_trunc:<22}"
+def _has_tokens(tokens: dict) -> bool:
+    return sum(int(tokens.get(k, 0) or 0) for k in ("input", "output", "cache_read", "cache_create")) > 0
+
+
+def _fmt_token_row(label: str, tokens: dict, bold: bool = False, dim: bool = False, indent: int = 2) -> str:
+    pad = " " * indent
+    label_width = 22 - (indent - 2)
+    label_trunc = _trunc(label, label_width)
+    label_col = f"{label_trunc:<{label_width}}"
     cols = [
-        f"{_fmt_tokens(int(tokens.get('input', 0))):>8}",
-        f"{_fmt_tokens(int(tokens.get('output', 0))):>8}",
-        f"{_fmt_tokens(int(tokens.get('cache_read', 0))):>8}",
-        f"{_fmt_tokens(int(tokens.get('cache_create', 0))):>8}",
+        f"{_fmt_tokens(int(tokens.get('input', 0) or 0)):>8}",
+        f"{_fmt_tokens(int(tokens.get('output', 0) or 0)):>8}",
+        f"{_fmt_tokens(int(tokens.get('cache_read', 0) or 0)):>8}",
+        f"{_fmt_tokens(int(tokens.get('cache_create', 0) or 0)):>8}",
     ]
-    row = f"  {label_col}{''.join(cols)}"
+    row = f"{pad}{label_col}{''.join(cols)}"
+    if bold and dim:
+        return f"[bold][dim]{row}[/dim][/bold]"
     if bold:
         return f"[bold]{row}[/bold]"
+    if dim:
+        return f"[dim]{row}[/dim]"
     return row
 
 
@@ -240,31 +252,102 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
 
     # --- Token Usage section ---
     tt = s.get("token_total") or {}
-    total_sum = sum(int(tt.get(k, 0)) for k in ("input", "output", "cache_read", "cache_create"))
+    total_sum = sum(int(tt.get(k, 0) or 0) for k in ("input", "output", "cache_read", "cache_create"))
     if total_sum > 0:
         lines.append("")
         lines.append("[bold]Token Usage[/bold]")
         lines.append("  Node                    input    output  cache-r  cache-w")
         lines.append("  [dim]" + "\u2500" * 58 + "[/dim]")
         lines.append(_fmt_token_row("Total", tt, bold=True))
+        lines.append("  [dim]" + "\u2500" * 58 + "[/dim]")
         tm = s.get("token_main") or {}
-        if sum(int(tm.get(k, 0)) for k in ("input", "output", "cache_read", "cache_create")) > 0:
+        if _has_tokens(tm):
             lines.append(_fmt_token_row("main", tm))
-        nodes = s.get("token_nodes") or []
-        nodes_sorted = sorted(
-            nodes,
-            key=lambda n: (
-                -(int(n["tokens"].get("input", 0)) + int(n["tokens"].get("output", 0))),
-                n["label"],
+
+        # --- Skill tree (hierarchical) or legacy token_nodes fallback ---
+        skill_tree = s.get("token_skill_tree") or []
+        standalone_raw_check = s.get("token_agents_standalone") or []
+        use_legacy = not skill_tree and not standalone_raw_check
+        if use_legacy:
+            # Legacy flat display: token_nodes list (backward compat)
+            nodes = s.get("token_nodes") or []
+            nodes_sorted = sorted(
+                nodes,
+                key=lambda n: (
+                    -(int((n.get("tokens") or {}).get("input", 0) or 0) + int((n.get("tokens") or {}).get("output", 0) or 0)),
+                    str(n.get("label", "")),
+                ),
+            )
+            shown_nodes = nodes_sorted[:_TOP_N_TOKEN]
+            for node in shown_nodes:
+                prefix = "[agent]" if node.get("node_type") == "agent" else "[skill]"
+                lines.append(_fmt_token_row(f"{prefix} {node.get('label', '')}", node.get("tokens") or {}))
+            extra = len(nodes_sorted) - len(shown_nodes)
+            if extra > 0:
+                lines.append(f"  [dim]... +{extra} more[/dim]")
+
+        if skill_tree:
+            skills_filtered = [
+                sk for sk in skill_tree
+                if _has_tokens((sk.get("total") or {}).get("tokens") or {})
+            ]
+            skills_sorted = sorted(
+                skills_filtered,
+                key=lambda sk: -(
+                    int(((sk.get("total") or {}).get("tokens") or {}).get("input", 0) or 0)
+                    + int(((sk.get("total") or {}).get("tokens") or {}).get("output", 0) or 0)
+                ),
+            )
+            skills_visible = skills_sorted[:_TOP_N_SKILL]
+            if skills_visible:
+                lines.append("")
+                for sk in skills_visible:
+                    skill_label = _sanitize(sk.get("label") or sk.get("skill_node_id") or "")
+                    skill_tokens = (sk.get("total") or {}).get("tokens") or {}
+                    lines.append(_fmt_token_row(f"[skill] {skill_label}", skill_tokens, indent=2))
+                    agents_raw = sk.get("agents") or []
+                    agents_filtered = [a for a in agents_raw if _has_tokens(a.get("tokens") or {})]
+                    agents_sorted = sorted(
+                        agents_filtered,
+                        key=lambda a: -(
+                            int((a.get("tokens") or {}).get("input", 0) or 0)
+                            + int((a.get("tokens") or {}).get("output", 0) or 0)
+                        ),
+                    )
+                    for ag in agents_sorted:
+                        ag_label = _sanitize(ag.get("label") or ag.get("node_id") or "")
+                        lines.append(_fmt_token_row(f"[agent] {ag_label}", ag.get("tokens") or {}, indent=4))
+            skill_overflow = len(skills_sorted) - len(skills_visible)
+            if skill_overflow > 0:
+                lines.append(f"  [dim]... +{skill_overflow} more skills[/dim]")
+
+        # --- Standalone agents ---
+        standalone_raw = standalone_raw_check
+        standalone_filtered = [a for a in standalone_raw if _has_tokens(a.get("tokens") or {})]
+        standalone_sorted = sorted(
+            standalone_filtered,
+            key=lambda a: -(
+                int((a.get("tokens") or {}).get("input", 0) or 0)
+                + int((a.get("tokens") or {}).get("output", 0) or 0)
             ),
         )
-        shown = nodes_sorted[:_TOP_N_TOKEN]
-        for node in shown:
-            prefix = "[agent]" if node["node_type"] == "agent" else "[skill]"
-            lines.append(_fmt_token_row(f"{prefix} {node['label']}", node["tokens"]))
-        extra = len(nodes_sorted) - len(shown)
-        if extra > 0:
-            lines.append(f"  [dim]... +{extra} more[/dim]")
+        if standalone_sorted:
+            lines.append("")
+            if len(standalone_sorted) >= 2:
+                # Subtotal across ALL standalone agents (including overflow)
+                subtotal: dict[str, int] = {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}
+                for a in standalone_sorted:
+                    t = a.get("tokens") or {}
+                    for k in subtotal:
+                        subtotal[k] += int(t.get(k, 0) or 0)
+                lines.append(_fmt_token_row(f"agents ({len(standalone_sorted)})", subtotal, dim=True, indent=2))
+            shown_standalone = standalone_sorted[:_TOP_N_AGENT]
+            for ag in shown_standalone:
+                ag_label = _sanitize(ag.get("label") or ag.get("node_id") or "")
+                lines.append(_fmt_token_row(f"[agent] {ag_label}", ag.get("tokens") or {}, indent=2))
+            agent_overflow = len(standalone_sorted) - len(shown_standalone)
+            if agent_overflow > 0:
+                lines.append(f"  [dim]... +{agent_overflow} more agents[/dim]")
 
     lines.append("")
     lines.append("(Esc / Enter to close)")
