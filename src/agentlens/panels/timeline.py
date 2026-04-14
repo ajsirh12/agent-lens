@@ -48,9 +48,6 @@ class TimelinePanel(Container):
         # next refresh tick instead of 500 redundant move_cursor calls.
         self._scroll_pending = False
         self._turn_counter: int = 0
-        # meta-turn-filter state
-        self.hide_meta: bool = False
-        self._in_meta_span: bool = False
 
     def compose(self) -> ComposeResult:
         self._placeholder = Static("waiting for events…", classes="placeholder")
@@ -94,8 +91,6 @@ class TimelinePanel(Container):
         # leave them alone.
         was_at_bottom = self._was_at_bottom()
         if ev.type == EventType.tool_use:
-            if self.hide_meta and self._in_meta_span:
-                return
             tid = ev.tool_use_id or ""
             raw_tool = ev.tool_name or "?"
             ts_str = ev.ts.strftime("%H:%M:%S")
@@ -147,8 +142,6 @@ class TimelinePanel(Container):
             if was_at_bottom:
                 self._scroll_to_end()
         elif ev.type == EventType.tool_result:
-            if self.hide_meta and self._in_meta_span:
-                return
             tid = ev.tool_use_id or ""
             if tid and tid in self._tool_use_row:
                 row_key = self._tool_use_row[tid]
@@ -200,16 +193,6 @@ class TimelinePanel(Container):
             # skip subagent user rows AND system-injected messages.
             if ev.payload.get("subagent_uuid"):
                 return
-            # meta-turn-filter: detect isMeta:true span entry
-            try:
-                is_meta = bool(ev.payload.get("is_meta"))
-            except Exception:
-                is_meta = False
-            if is_meta:
-                self._in_meta_span = True
-                return  # meta user row itself is not displayed (same as before)
-            # Real or system-prefix user message — close any meta span
-            self._in_meta_span = False
             if _is_real_user_prompt(ev):
                 self._turn_counter += 1
                 turn_num = self._turn_counter
@@ -423,7 +406,6 @@ class TimelinePanel(Container):
         self._row_count = 0
         self._scroll_pending = False
         self._turn_counter = 0
-        self._in_meta_span = False  # reset span state; hide_meta is preserved
         if self._table is None:
             return
         try:

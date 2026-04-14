@@ -93,7 +93,6 @@ agentlens
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
 | `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
 | `Shift+S` | 경로/세션 ID 붙여넣기 모달 — 임의의 JSONL 파일 또는 session id prefix 로 전환 |
-| `t` | **Meta filter toggle** — teammate callback 으로 생성된 meta span `tool_use`/`tool_result` 행 숨기기/표시. Footer 에 `[meta:hidden]` 표시 (ON 일 때) |
 
 ### Flowchart 모드 토글
 
