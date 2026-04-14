@@ -9,6 +9,7 @@ from agentlens.graph_model import CallGraph
 from agentlens.panels.turn_summary import (
     _build_lines,
     _fmt_ms,
+    _fmt_tokens,
     _mcp_display,
     _trunc,
 )
@@ -495,3 +496,98 @@ async def test_get_selected_turn_index_detects_turn_marker(tmp_path) -> None:
         await pilot.pause()
         idx2 = tl.get_selected_turn_index()
         assert idx2 is None, f"expected None on non-turn row, got {idx2}"
+
+
+# --- _fmt_tokens boundary tests ---
+
+
+def test__fmt_tokens_boundaries() -> None:
+    assert _fmt_tokens(0) == "[dim]-[/dim]"
+    assert _fmt_tokens(999) == "999"
+    assert _fmt_tokens(1000) == "1.0k"
+    assert _fmt_tokens(9999) == "10.0k"
+    assert _fmt_tokens(10000) == "10k"
+    assert _fmt_tokens(999999) == "999k"
+    assert _fmt_tokens(1000000) == "1.0M"
+    assert _fmt_tokens(1000000000) == "1.0B"
+
+
+def _token_summary(token_total: dict, token_main: dict | None = None,
+                   token_nodes: list | None = None) -> dict:
+    """Helper to build a minimal summary dict with token fields."""
+    return {
+        "index": 0,
+        "prompt": "",
+        "duration_s": 1.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "total_agent_duration_s": 0.0,
+        "end_ts": 1.0,
+        "agents": [],
+        "tool_usage": [],
+        "tool_total": 0,
+        "mcp_usage": [],
+        "mcp_total": 0,
+        "hook_usage": [],
+        "hook_runs": 0,
+        "hook_errors_total": 0,
+        "hook_duration_ms": 0,
+        "hooks_configured": False,
+        "token_total": token_total,
+        "token_main": token_main or {},
+        "token_nodes": token_nodes or [],
+    }
+
+
+def test__token_section_hidden_when_zero() -> None:
+    summary = _token_summary(
+        token_total={"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}
+    )
+    combined = _combined(summary)
+    assert "Token Usage" not in combined
+
+
+def test__token_section_shows_when_nonzero() -> None:
+    summary = _token_summary(
+        token_total={"input": 100, "output": 50, "cache_read": 0, "cache_create": 0}
+    )
+    combined = _combined(summary)
+    assert "Token Usage" in combined
+
+
+def test__token_overflow() -> None:
+    """12 nodes → only first 10 shown, '+2 more' overflow line rendered."""
+    nodes = [
+        {"label": f"agent{i}", "node_type": "agent",
+         "tokens": {"input": 100 - i, "output": 10, "cache_read": 0, "cache_create": 0}}
+        for i in range(12)
+    ]
+    summary = _token_summary(
+        token_total={"input": 500, "output": 100, "cache_read": 0, "cache_create": 0},
+        token_nodes=nodes,
+    )
+    combined = _combined(summary)
+    assert "+2 more" in combined
+
+
+def test__token_sort_order() -> None:
+    """Nodes sorted by input+output descending."""
+    nodes = [
+        {"label": "small", "node_type": "agent",
+         "tokens": {"input": 10, "output": 5, "cache_read": 0, "cache_create": 0}},
+        {"label": "large", "node_type": "agent",
+         "tokens": {"input": 500, "output": 200, "cache_read": 0, "cache_create": 0}},
+        {"label": "medium", "node_type": "agent",
+         "tokens": {"input": 100, "output": 50, "cache_read": 0, "cache_create": 0}},
+    ]
+    summary = _token_summary(
+        token_total={"input": 610, "output": 255, "cache_read": 0, "cache_create": 0},
+        token_nodes=nodes,
+    )
+    combined = _combined(summary)
+    # 'large' must appear before 'medium' which appears before 'small'.
+    pos_large = combined.index("large")
+    pos_medium = combined.index("medium")
+    pos_small = combined.index("small")
+    assert pos_large < pos_medium < pos_small

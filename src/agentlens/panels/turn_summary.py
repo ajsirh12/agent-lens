@@ -18,6 +18,7 @@ from textual.widgets import Static
 _TOP_N_TOOL = 8
 _TOP_N_MCP = 6
 _TOP_N_HOOK = 5
+_TOP_N_TOKEN = 10
 
 
 def _sanitize(s: object) -> str:
@@ -60,6 +61,36 @@ def _mcp_display(server: str, tool: str) -> str:
     """Format server\xb7tool, truncating to 38 chars."""
     combined = f"{server}\u00b7{tool}"
     return _trunc(combined, 38)
+
+
+def _fmt_tokens(n: int) -> str:
+    n = max(0, int(n))
+    if n == 0:
+        return "[dim]-[/dim]"
+    if n < 1_000:
+        return str(n)
+    if n < 10_000:
+        return f"{n/1000:.1f}k"
+    if n < 1_000_000:
+        return f"{n//1000}k"
+    if n < 1_000_000_000:
+        return f"{n/1_000_000:.1f}M"
+    return f"{n/1_000_000_000:.1f}B"
+
+
+def _fmt_token_row(label: str, tokens: dict, bold: bool = False) -> str:
+    label_trunc = _trunc(label, 22)
+    label_col = f"{label_trunc:<22}"
+    cols = [
+        f"{_fmt_tokens(int(tokens.get('input', 0))):>8}",
+        f"{_fmt_tokens(int(tokens.get('output', 0))):>8}",
+        f"{_fmt_tokens(int(tokens.get('cache_read', 0))):>8}",
+        f"{_fmt_tokens(int(tokens.get('cache_create', 0))):>8}",
+    ]
+    row = f"  {label_col}{''.join(cols)}"
+    if bold:
+        return f"[bold]{row}[/bold]"
+    return row
 
 
 def _build_lines(s: dict[str, Any]) -> list[str]:
@@ -206,6 +237,34 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
             hook_overflow = len(hook_usage) - len(shown_hooks)
             if hook_overflow > 0:
                 lines.append(f"  ... +{hook_overflow} more")
+
+    # --- Token Usage section ---
+    tt = s.get("token_total") or {}
+    total_sum = sum(int(tt.get(k, 0)) for k in ("input", "output", "cache_read", "cache_create"))
+    if total_sum > 0:
+        lines.append("")
+        lines.append("[bold]Token Usage[/bold]")
+        lines.append("  Node                    input    output  cache-r  cache-w")
+        lines.append("  [dim]" + "\u2500" * 58 + "[/dim]")
+        lines.append(_fmt_token_row("Total", tt, bold=True))
+        tm = s.get("token_main") or {}
+        if sum(int(tm.get(k, 0)) for k in ("input", "output", "cache_read", "cache_create")) > 0:
+            lines.append(_fmt_token_row("main", tm))
+        nodes = s.get("token_nodes") or []
+        nodes_sorted = sorted(
+            nodes,
+            key=lambda n: (
+                -(int(n["tokens"].get("input", 0)) + int(n["tokens"].get("output", 0))),
+                n["label"],
+            ),
+        )
+        shown = nodes_sorted[:_TOP_N_TOKEN]
+        for node in shown:
+            prefix = "[agent]" if node["node_type"] == "agent" else "[skill]"
+            lines.append(_fmt_token_row(f"{prefix} {node['label']}", node["tokens"]))
+        extra = len(nodes_sorted) - len(shown)
+        if extra > 0:
+            lines.append(f"  [dim]... +{extra} more[/dim]")
 
     lines.append("")
     lines.append("(Esc / Enter to close)")

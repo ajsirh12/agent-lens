@@ -132,6 +132,28 @@ following heuristic (see `parser.py::_agent_id_from`):
 | Timeline dur_ms   | monotonic delta between matching tool_use / tool_result by `tool_use_id`|
 | AgentTree label   | `obj.sessionId[:8]` or tool input `subagent_type`                      |
 
+## `message.usage` (v0.8.0+)
+
+`type:"assistant"` rows carry a `message.usage` dict with token counts per API call.
+Present in both main-session and subagent JSONL files.
+
+| field | type | notes |
+|---|---|---|
+| `input_tokens` | int | non-cached input tokens |
+| `cache_creation_input_tokens` | int | tokens added to prompt cache |
+| `cache_read_input_tokens` | int | tokens served from prompt cache |
+| `output_tokens` | int | generated output tokens |
+| `service_tier` | str\|null | e.g. "standard" |
+| `inference_geo` | str\|null | geographic routing hint |
+| `cache_creation` | dict | `{ephemeral_5m_input_tokens, ephemeral_1h_input_tokens}` |
+| `server_tool_use` | dict\|absent | `{web_search_requests, web_fetch_requests}` (79.7% frequency) |
+| `iterations` | list\|absent | streaming iteration records (63.8% frequency) |
+
+**Parser usage**: `_extract_usage(msg)` in `parser.py` extracts the four core fields only
+(`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`).
+Row-level: one extraction per `assistant` row, attached to the first `assistant_message`
+event only. Missing fields and null values degrade gracefully to zero (AC10, never-raise).
+
 ## "system" top-level type (v0.7.0+)
 
 The parser now collects `type:"system"` events that carry hook summary data.

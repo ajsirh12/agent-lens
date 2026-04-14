@@ -8,6 +8,53 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [0.8.0] - 2026-04-14
+
+Turn Summary modal now shows Token Usage breakdown. Parser defensively
+extracts LLM token consumption per message, accumulates six token-tracking
+fields per turn, and gracefully hides the Token Usage section for legacy
+sessions without usage data. 235 tests passing (+12).
+
+### Added
+
+- **Turn Summary modal — Token Usage section** shows LLM token consumption
+  per turn, broken down across three views: total tokens for the turn,
+  main-session tokens, and aggregated agent/skill subtokens. Visible only
+  when token data is present; silently hidden for legacy sessions (v<0.8.0).
+- **`_extract_usage()` defensive extractor** in `parser.py` reads
+  `message.usage` dict fields (`input_tokens`, `output_tokens`,
+  `cache_creation_input_tokens`, `cache_read_input_tokens`) from assistant
+  rows. Row-level: one extraction per `assistant` row, attached to the
+  first `assistant_message` event only. Graceful fallback to zero on missing
+  or malformed fields (AC10, never-raise).
+- **`TurnRecord` fields extended** — six token-tracking fields:
+  `input_tokens`, `output_tokens`, `cache_creation_input_tokens`,
+  `cache_read_input_tokens` (per-turn cumulative sums), `token_main`
+  (main-session only), `token_nodes` (sum of agent/skill subtokens).
+- **`get_turn_summary()` return dict extended** (additive, AC-11):
+  - `token_total` — total tokens consumed across all subagents
+  - `token_main` — tokens consumed by main-session assistant
+  - `token_nodes` — sum of token consumption across all agent/skill spawns
+- **Schema-tolerant usage extraction** — missing `message.usage` dict, null
+  fields, and malformed JSON all degrade gracefully to zero. Incompatible
+  row shapes do not emit exceptions or debug logs (v0.8.0 silent-drop mode).
+
+### Fixed
+
+- **Subagent token attribution** — each agent spawn or skill invocation
+  opens a separate JSONL (subagent file) with its own usage tracking. The
+  parser now correctly routes each subagent's token sum to `token_nodes`
+  instead of double-counting against `token_main`.
+
+### Tests
+
+- Full suite: 223 → **235 passing** (+12). New tests cover token extraction
+  with missing fields, cache fields, legacy-session graceful hiding,
+  main/node attribution, and Turn Summary modal rendering with Token Usage
+  section.
+
+---
+
 ## [0.7.0] - 2026-04-14
 
 Turn Summary modal now shows Tool Usage, MCP tools, and Hooks breakdown.

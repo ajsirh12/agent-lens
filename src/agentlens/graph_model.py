@@ -47,6 +47,21 @@ class TurnRecord:
     tool_overflow_names: set[str] = field(default_factory=set)
     mcp_overflow_names: set[str] = field(default_factory=set)
     hook_overflow_names: set[str] = field(default_factory=set)
+    # Token tracking (v0.8.0+). Per-turn totals across all assistant rows
+    # attributed to this turn (main-session + linked subagent sessions).
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    # Bare "main" bucket = main-session assistant usage NOT inside any
+    # skill tool_use/tool_result span.
+    token_main: dict = field(default_factory=lambda: {
+        "input": 0, "output": 0, "cache_read": 0, "cache_create": 0,
+    })
+    # Per-node breakdown. key = FlowRecord.node_id,
+    # value = {"label": str, "node_type": "agent"|"skill",
+    #          "tokens": {"input","output","cache_read","cache_create"}}
+    token_nodes: dict = field(default_factory=dict)
 
 ROOT_ID = "main"
 
@@ -286,6 +301,12 @@ class CallGraph:
             # 'subagent_uuid' payload field. Those must NOT create new
             # graph nodes; they only update the linked Agent node's
             # tool_breakdown.
+            # tool_use-only assistant rows carry the row's usage on the
+            # tool_use event (no text block precedes). Attribute first so
+            # the skill-span lookup doesn't match the row's own FlowRecord
+            # (not yet created at this point).
+            if isinstance(ev.payload, dict) and ev.payload.get("usage") is not None:
+                self._handle_assistant_usage(ev)
             if ev.payload.get("subagent_uuid"):
                 return self._handle_subagent_tool_use(ev)
             return self._handle_tool_use(ev)
@@ -295,6 +316,8 @@ class CallGraph:
             return self._handle_task_notification(ev)
         if ev.type == EventType.hook_summary:
             return self._handle_hook_summary(ev)
+        if ev.type in (EventType.assistant_message, EventType.thinking):
+            return self._handle_assistant_usage(ev)
         if ev.type == EventType.user_message:
             # Events originating from a subagent JSONL file carry a
             # subagent_uuid — these are the initial prompt the main
@@ -980,6 +1003,36 @@ class CallGraph:
                 "tool_overflow": tool_overflow,
                 "mcp_overflow": mcp_overflow,
                 "hook_overflow": hook_overflow,
+                # Token usage (v0.8.0+)
+                "token_total": {
+                    "input": turn.input_tokens if turn is not None else 0,
+                    "output": turn.output_tokens if turn is not None else 0,
+                    "cache_read": (
+                        turn.cache_read_input_tokens
+                        if turn is not None else 0
+                    ),
+                    "cache_create": (
+                        turn.cache_creation_input_tokens
+                        if turn is not None else 0
+                    ),
+                },
+                "token_main": (
+                    dict(turn.token_main) if turn is not None else {
+                        "input": 0, "output": 0,
+                        "cache_read": 0, "cache_create": 0,
+                    }
+                ),
+                "token_nodes": (
+                    [
+                        {
+                            "label": v.get("label", ""),
+                            "node_type": v.get("node_type", ""),
+                            "tokens": dict(v.get("tokens", {})),
+                        }
+                        for v in turn.token_nodes.values()
+                    ]
+                    if turn is not None else []
+                ),
             }
         except Exception:
             return {
@@ -1008,6 +1061,15 @@ class CallGraph:
                 "tool_overflow": 0,
                 "mcp_overflow": 0,
                 "hook_overflow": 0,
+                "token_total": {
+                    "input": 0, "output": 0,
+                    "cache_read": 0, "cache_create": 0,
+                },
+                "token_main": {
+                    "input": 0, "output": 0,
+                    "cache_read": 0, "cache_create": 0,
+                },
+                "token_nodes": [],
             }
 
     # ------------------------------------------------------------------
@@ -1116,6 +1178,180 @@ class CallGraph:
                     {"command": cmd, "durationMs": dur, "event_type": event_type}
                 )
                 remaining_raw_cap -= 1
+        return True
+
+    # ------------------------------------------------------------------
+    # Token usage attribution (v0.8.0+)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _accumulate_tokens(bucket: dict, usage: dict) -> None:
+        """Accumulate the four canonical usage fields into ``bucket``.
+
+        Keys are normalized from JSONL names
+        (``input_tokens``/``output_tokens``/``cache_creation_input_tokens``/
+        ``cache_read_input_tokens``) to the short internal names
+        (``input``/``output``/``cache_create``/``cache_read``). Values are
+        coerced to non-negative ints; bad types contribute 0 so the
+        never-raise guarantee (AC10) holds.
+        """
+        def _coerce(v) -> int:
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                return 0
+            return n if n > 0 else 0
+
+        bucket["input"] = bucket.get("input", 0) + _coerce(
+            usage.get("input_tokens")
+        )
+        bucket["output"] = bucket.get("output", 0) + _coerce(
+            usage.get("output_tokens")
+        )
+        bucket["cache_read"] = bucket.get("cache_read", 0) + _coerce(
+            usage.get("cache_read_input_tokens")
+        )
+        bucket["cache_create"] = bucket.get("cache_create", 0) + _coerce(
+            usage.get("cache_creation_input_tokens")
+        )
+
+    @staticmethod
+    def _accumulate_total(turn: TurnRecord, usage: dict) -> None:
+        """Accumulate into the TurnRecord's scalar totals."""
+        def _coerce(v) -> int:
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                return 0
+            return n if n > 0 else 0
+
+        turn.input_tokens += _coerce(usage.get("input_tokens"))
+        turn.output_tokens += _coerce(usage.get("output_tokens"))
+        turn.cache_creation_input_tokens += _coerce(
+            usage.get("cache_creation_input_tokens")
+        )
+        turn.cache_read_input_tokens += _coerce(
+            usage.get("cache_read_input_tokens")
+        )
+
+    def _accumulate_node(
+        self,
+        turn: TurnRecord,
+        node_id: str,
+        label: str,
+        node_type: str,
+        usage: dict,
+    ) -> None:
+        """Accumulate into ``turn.token_nodes[node_id]``, creating the
+        entry on first touch. Insertion order is preserved so panel-side
+        sorting is stable.
+        """
+        entry = turn.token_nodes.get(node_id)
+        if entry is None:
+            entry = {
+                "label": label,
+                "node_type": node_type,
+                "tokens": {
+                    "input": 0, "output": 0,
+                    "cache_read": 0, "cache_create": 0,
+                },
+            }
+            turn.token_nodes[node_id] = entry
+        self._accumulate_tokens(entry["tokens"], usage)
+
+    def _node_turn_index_for(self, node_id: str) -> int:
+        """Return the turn_index of the first FlowRecord that spawned
+        this node_id, or -1 if no record is found. Uses the existing
+        ``_flow_history`` + ``_flow_tid_to_index`` infrastructure — no
+        new bookkeeping required.
+        """
+        try:
+            for rec in self._flow_history:
+                if rec.node_id == node_id:
+                    return rec.turn_index
+        except Exception:
+            return -1
+        return -1
+
+    def _find_active_skill_span(
+        self, turn: TurnRecord, ts_epoch: float,
+    ) -> "FlowRecord | None":
+        """Return the first FlowRecord in ``turn`` whose time window
+        [started_ts, ended_ts] (or open) contains ``ts_epoch`` and whose
+        node_type is ``"skill"``. Returns None if no such span is active.
+        """
+        try:
+            for rec in self._flow_history:
+                if rec.turn_index != turn.index:
+                    continue
+                if rec.node_type != "skill":
+                    continue
+                if rec.started_ts > ts_epoch:
+                    continue
+                if rec.ended_ts is not None and ts_epoch > rec.ended_ts:
+                    continue
+                return rec
+        except Exception:
+            return None
+        return None
+
+    def _handle_assistant_usage(self, ev: HarnessEvent) -> bool:
+        """Attribute a single ``assistant_message`` event's ``usage`` to
+        the correct TurnRecord bucket(s).
+
+        Row-level 1-time attachment is enforced upstream (parser.py):
+        only the first event produced per assistant row carries
+        ``payload["usage"]``. Subsequent events in the same row have no
+        ``usage`` key and are skipped here.
+
+        Routing:
+          - subagent_uuid present → agent-side attribution (spawn-time
+            turn, per-node bucket)
+          - subagent_uuid absent  → main-side attribution. Within a
+            ``skill`` tool_use/tool_result span → that skill's bucket;
+            otherwise ``token_main``.
+
+        Never raises; any mapping/lookup failure drops the event.
+        """
+        payload = ev.payload if isinstance(ev.payload, dict) else {}
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            return False  # second event in a multi-block row, or no usage
+
+        subagent_uuid = payload.get("subagent_uuid")
+        if subagent_uuid:
+            node_id = self._subagent_uuid_to_node.get(str(subagent_uuid))
+            if not node_id:
+                return False  # subagent not yet linked — drop
+            node = self.nodes.get(node_id)
+            if node is None:
+                return False
+            turn_idx = self._node_turn_index_for(node_id)
+            if turn_idx < 0 or turn_idx >= len(self._turns):
+                return False
+            turn = self._turns[turn_idx]
+            self._accumulate_total(turn, usage)
+            self._accumulate_node(
+                turn, node_id, node.label, "agent", usage,
+            )
+            return True
+
+        # Main session path.
+        if self._current_turn_index < 0:
+            return False  # AC-12: pre-first-turn drop
+        try:
+            turn = self._turns[self._current_turn_index]
+        except IndexError:
+            return False
+        self._accumulate_total(turn, usage)
+
+        ts_epoch = ev.ts.timestamp() if ev.ts is not None else 0.0
+        skill_rec = self._find_active_skill_span(turn, ts_epoch)
+        if skill_rec is not None:
+            self._accumulate_node(
+                turn, skill_rec.node_id, skill_rec.label, "skill", usage,
+            )
+        else:
+            self._accumulate_tokens(turn.token_main, usage)
         return True
 
     def _get_hooks_configured(self) -> bool:

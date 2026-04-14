@@ -142,6 +142,31 @@ def _coerce_hook_errors(value: Any) -> int:
     return 0
 
 
+def _extract_usage(msg: dict) -> dict | None:
+    """Extract token usage from message.usage, coercing all values to non-negative int.
+
+    Returns None if usage is absent or not a dict. Per FR-7 / AC10 never-raise:
+    bad field types (str, null, negative, float) are coerced to 0 silently.
+    """
+    u = msg.get("usage")
+    if not isinstance(u, dict):
+        return None
+
+    def _coerce(v: object) -> int:
+        try:
+            n = int(v)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return 0
+        return max(0, n)
+
+    return {
+        "input_tokens": _coerce(u.get("input_tokens")),
+        "output_tokens": _coerce(u.get("output_tokens")),
+        "cache_creation_input_tokens": _coerce(u.get("cache_creation_input_tokens")),
+        "cache_read_input_tokens": _coerce(u.get("cache_read_input_tokens")),
+    }
+
+
 def _parse_ts(raw: Any) -> datetime:
     if isinstance(raw, str):
         try:
@@ -344,6 +369,15 @@ def parse_line(line: str) -> list[HarnessEvent]:
         return []
 
     # assistant / user rows: explode content[] blocks into events.
+
+    # Extract row-level usage once, before the block loop (FR-1, FR-2, §4.1).
+    # Only assistant rows carry message.usage; for user rows this returns None.
+    if top_type == "assistant":
+        msg_obj = obj.get("message")
+        row_usage = _extract_usage(msg_obj) if isinstance(msg_obj, dict) else None
+    else:
+        row_usage = None
+
     blocks = _content_blocks(obj)
     if not blocks:
         # Assistant row with no content (empty message) — surface as message.
@@ -352,17 +386,22 @@ def parse_line(line: str) -> list[HarnessEvent]:
             if top_type == "assistant"
             else EventType.user_message
         )
+        payload_empty: dict[str, Any] = {"uuid": obj.get("uuid")}
+        # Attach usage to this sole event if present (FR-2: first/only event).
+        if row_usage is not None:
+            payload_empty["usage"] = row_usage
         return [
             HarnessEvent(
                 type=kind,
                 ts=ts,
                 agent_id=agent_id,
-                payload={"uuid": obj.get("uuid")},
+                payload=payload_empty,
                 raw_line=_truncate(line),
             )
         ]
 
     out: list[HarnessEvent] = []
+    first_event = True  # tracks whether we've attached usage yet (FR-2)
     for block in blocks:
         bt = block.get("type")
         if bt not in SUPPORTED_CONTENT_TYPES:
@@ -383,19 +422,23 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 isinstance(tool_name_raw, str)
                 and tool_name_raw.startswith("mcp__")
             )
+            block_payload: dict[str, Any] = {
+                "tool_use_id": block.get("id"),
+                "tool_name": tool_name_raw,
+                "input": block.get("input"),
+                "parent_tool_use_id": block.get("parent_tool_use_id"),
+                "uuid": obj.get("uuid"),
+                "is_mcp": is_mcp,
+            }
+            if first_event and row_usage is not None:
+                block_payload["usage"] = row_usage
+                first_event = False
             out.append(
                 HarnessEvent(
                     type=EventType.tool_use,
                     ts=ts,
                     agent_id=agent_id,
-                    payload={
-                        "tool_use_id": block.get("id"),
-                        "tool_name": tool_name_raw,
-                        "input": block.get("input"),
-                        "parent_tool_use_id": block.get("parent_tool_use_id"),
-                        "uuid": obj.get("uuid"),
-                        "is_mcp": is_mcp,
-                    },
+                    payload=block_payload,
                     raw_line=_truncate(line),
                 )
             )
@@ -409,6 +452,9 @@ def parse_line(line: str) -> list[HarnessEvent]:
             }
             if linked:
                 payload["linked_subagent_uuid"] = linked
+            if first_event and row_usage is not None:
+                payload["usage"] = row_usage
+                first_event = False
             out.append(
                 HarnessEvent(
                     type=EventType.tool_result,
@@ -428,6 +474,12 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 "text": block.get("text", "")[:500],
                 "is_meta": is_meta,
             }
+            # Attach row-level usage to the first event of any block type (FR-2,
+            # §3.3). Covers tool_use-only rows (29/70 observed). user rows never
+            # carry row_usage (set to None above).
+            if first_event and row_usage is not None:
+                text_payload["usage"] = row_usage
+                first_event = False
             out.append(
                 HarnessEvent(
                     type=kind,
@@ -438,12 +490,18 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 )
             )
         elif bt == "thinking":
+            thinking_payload: dict[str, Any] = {
+                "thinking": (block.get("thinking") or "")[:500],
+            }
+            if first_event and row_usage is not None:
+                thinking_payload["usage"] = row_usage
+                first_event = False
             out.append(
                 HarnessEvent(
                     type=EventType.thinking,
                     ts=ts,
                     agent_id=agent_id,
-                    payload={"thinking": (block.get("thinking") or "")[:500]},
+                    payload=thinking_payload,
                     raw_line=_truncate(line),
                 )
             )

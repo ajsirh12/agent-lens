@@ -356,3 +356,101 @@ def test_subagent_user_message_does_not_flush_turn() -> None:
     g.update_from_event(subagent_um)
     # Turn must be intact.
     assert g.is_in_current_turn("agent:explore") is True
+
+
+# --- Token accumulation tests ---
+
+
+def _assistant_usage(usage: dict, subagent_uuid: str | None = None) -> HarnessEvent:
+    payload: dict = {"usage": usage}
+    if subagent_uuid is not None:
+        payload["subagent_uuid"] = subagent_uuid
+    return HarnessEvent(
+        type=EventType.assistant_message,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload=payload,
+    )
+
+
+def test__token_main_accumulate() -> None:
+    """Two main assistant events in one turn accumulate into token_main and totals."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # creates turn index 0
+
+    usage1 = {"input_tokens": 10, "output_tokens": 5,
+               "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    usage2 = {"input_tokens": 20, "output_tokens": 8,
+               "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    g.update_from_event(_assistant_usage(usage1))
+    g.update_from_event(_assistant_usage(usage2))
+
+    s = g.get_turn_summary(0)
+    tt = s["token_total"]
+    assert tt["input"] == 30
+    assert tt["output"] == 13
+    tm = s["token_main"]
+    assert tm["input"] == 30
+    assert tm["output"] == 13
+
+
+def test__token_preturn_drop() -> None:
+    """AC-12: assistant usage before any user_message (turn index < 0) is dropped."""
+    g = CallGraph()
+    # No user_message → _current_turn_index == -1
+    usage = {"input_tokens": 50, "output_tokens": 10,
+             "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    changed = g.update_from_event(_assistant_usage(usage))
+    # Event is silently dropped, no turns exist.
+    assert changed is False
+    assert g.get_turn_summary(0)["token_total"]["input"] == 0
+
+
+def test__token_skill_span() -> None:
+    """Assistant usage inside a skill tool_use/result span → skill node bucket."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # creates turn 0
+
+    # Spawn a skill.
+    skill_ev = HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_name": "Skill", "tool_use_id": "sk1", "input": {"skill": "myskill"}},
+    )
+    g.update_from_event(skill_ev)
+
+    # Assistant usage that occurs within the skill span.
+    usage = {"input_tokens": 100, "output_tokens": 40,
+             "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    g.update_from_event(_assistant_usage(usage))
+
+    # Close the skill span.
+    result_ev = HarnessEvent(
+        type=EventType.tool_result,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_use_id": "sk1", "is_error": False},
+    )
+    g.update_from_event(result_ev)
+
+    s = g.get_turn_summary(0)
+    # Total tokens must include the skill usage.
+    assert s["token_total"]["input"] == 100
+    # token_nodes should contain the skill entry.
+    node_labels = [n["label"] for n in s["token_nodes"]]
+    assert "myskill" in node_labels
+
+
+def test__unknown_subagent_drop() -> None:
+    """assistant_message with an unknown subagent_uuid → silently dropped, no exception."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    usage = {"input_tokens": 5, "output_tokens": 2,
+             "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+    # This subagent UUID is not registered in the graph.
+    changed = g.update_from_event(_assistant_usage(usage, subagent_uuid="unknown-uuid-xyz"))
+    assert changed is False
+    # Main turn totals must remain zero — nothing was accumulated.
+    s = g.get_turn_summary(0)
+    assert s["token_total"]["input"] == 0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from agentlens.events import EventType
-from agentlens.parser import parse_line
+from agentlens.parser import _extract_usage, parse_line
 
 
 def test_empty_line_returns_empty_list():
@@ -121,3 +121,103 @@ def test_parse_line_truncates_raw_line_at_cap():
             assert len(raw) <= MAX_RAW_LINE, (
                 f"raw_line length {len(raw)} exceeds MAX_RAW_LINE {MAX_RAW_LINE}"
             )
+
+
+# --- _extract_usage unit tests (FR-7 / AC10) ---
+
+
+def test__extract_usage_normal() -> None:
+    msg = {
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "cache_creation_input_tokens": 5,
+            "cache_read_input_tokens": 3,
+        }
+    }
+    result = _extract_usage(msg)
+    assert result is not None
+    assert result["input_tokens"] == 10
+    assert result["output_tokens"] == 20
+    assert result["cache_creation_input_tokens"] == 5
+    assert result["cache_read_input_tokens"] == 3
+
+
+def test__extract_usage_null() -> None:
+    msg = {"usage": None}
+    result = _extract_usage(msg)
+    assert result is None
+
+
+def test__extract_usage_str_coerce() -> None:
+    msg = {
+        "usage": {
+            "input_tokens": "6",
+            "output_tokens": 2,
+            "cache_creation_input_tokens": None,
+            "cache_read_input_tokens": 0,
+        }
+    }
+    result = _extract_usage(msg)
+    # string "6" → parser coerces via int(); "6" parses to 6
+    assert result is not None
+    assert result["input_tokens"] == 6
+    # None → coerce to 0
+    assert result["cache_creation_input_tokens"] == 0
+
+
+def test__extract_usage_negative() -> None:
+    msg = {
+        "usage": {
+            "input_tokens": -1,
+            "output_tokens": -99,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        }
+    }
+    result = _extract_usage(msg)
+    assert result is not None
+    assert result["input_tokens"] == 0
+    assert result["output_tokens"] == 0
+
+
+def test__first_event_only() -> None:
+    """assistant row with text+tool_use+text → only the first event carries 'usage'."""
+    row = {
+        "type": "assistant",
+        "sessionId": "sess-1",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-first",
+        "isSidechain": False,
+        "message": {
+            "role": "assistant",
+            "usage": {"input_tokens": 7, "output_tokens": 3,
+                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+            "content": [
+                {"type": "text", "text": "hello"},
+                {"type": "tool_use", "id": "toolu_x", "name": "Bash", "input": {"command": "ls"}},
+                {"type": "text", "text": "done"},
+            ],
+        },
+    }
+    events = parse_line(json.dumps(row))
+    assert len(events) == 3
+    # Only the first event should carry usage.
+    assert "usage" in events[0].payload
+    for ev in events[1:]:
+        assert "usage" not in ev.payload
+
+
+def test__empty_blocks_no_crash() -> None:
+    """assistant row with empty content list must not raise."""
+    row = {
+        "type": "assistant",
+        "sessionId": "sess-empty",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-empty",
+        "isSidechain": False,
+        "message": {"role": "assistant", "content": []},
+    }
+    # Must not raise.
+    events = parse_line(json.dumps(row))
+    assert isinstance(events, list)
