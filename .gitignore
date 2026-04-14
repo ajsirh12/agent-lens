@@ -63,6 +63,7 @@ state/
 
 # Harness workspace (runtime artifacts)
 .claude/_workspace/
+_workspace/
 
 # Environment variables
 .env
