@@ -74,7 +74,14 @@ nested subagent trees and parallel-instance views.
   whose slug convention this tool doesn't natively know.
 - **Subagent watcher** automatically discovers and tails new
   `agent-*.jsonl` files as they're created under the session's
-  `subagents/` directory.
+  `subagents/` directory. Team agents spawned via
+  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` are resolved by OMC name
+  (e.g. `verifier-a`, `executor`) from `.meta.json` sidecars.
+- **Turn Summary — Token Usage breakdown** (v0.8.1): Turn Summary modal
+  shows per-skill and per-agent token consumption in a hierarchy. Skill
+  spans list their sub-agents with 4-space indentation; standalone agents
+  appear under a separate `agents (N)` section. Double-counting is
+  prevented — `Total` is the leaf sum only.
 - **Defensive**: schema-tolerant parser (never raises on unknown
   fields), MAX_NODES / MAX_BUFFER_BYTES / MAX_RAW_LINE caps against
   adversarial input, ANSI escape sanitization for terminal safety.
@@ -114,7 +121,7 @@ architecture notes.
 ## Tests
 
 ```bash
-pytest -q           # 177 tests
+pytest -q           # 235 tests
 ```
 
 ## Manual Verification
@@ -153,11 +160,10 @@ polling loop or set_interval rate is ever changed.
 
 ## Status
 
-v0.5.0 — Flow mode, timeline markers, description labels. The
-Flowchart panel now cycles three modes (`m` key: all → running →
-flow). Flow mode shows every invocation as an individual node
-with temporal edges and parallel fork detection, persisting across
-turns for full session orchestration visibility. Timeline gains
-`▶`/`✓` start/end markers. 177 tests passing.
+v0.8.1 — Subagent token breakdown + OMC team agent attribution fix.
+Turn Summary modal now shows per-skill and per-agent token consumption
+in a hierarchy. OMC team agents (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)
+appear by name in the flowchart via `.meta.json` resolution. Teammate-
+message turns no longer split turn counters. 235 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

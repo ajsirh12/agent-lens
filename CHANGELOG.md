@@ -10,16 +10,31 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ## [Unreleased]
 
+---
+
+## [0.8.1] - 2026-04-14
+
+Subagent token breakdown in Turn Summary, OMC team agent attribution fix,
+and teammate-message turn suppression. Turn Summary now shows per-skill and
+per-agent token consumption in a hierarchy. Team agents (native
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`) now correctly appear by OMC name
+in the flowchart instead of being unlinked. 235 tests passing.
+
 ### Added
 
 - **Turn Summary modal — Token Usage section enhanced with subagent/skill hierarchy**
-  - Skill-spawned subagents now display under their parent skill with indentation (4-space)
-  - Skill span label format: `[skill] name` with sumaggregate under `agents` sub-list
-  - Standalone agents (spawned outside skill context) display under separate `agents (N)` section
-  - Each agent attribution captured via `_agent_to_skill` snapshot map at spawn time, enabling
-    async token attribution even when subagent messages arrive across turn boundaries
-  - `Total` row calculated as leaf sum only (no double-counting): `token_main` + sum of standalone
-    agents + sum of all skill sub-agents = `token_total`
+  - Skill-spawned subagents display under their parent skill with 4-space indentation
+  - Skill span label format: `[skill] name` with sub-aggregate `agents` sub-list
+  - Standalone agents (spawned outside skill context) display under a separate
+    `agents (N)` section
+  - Each agent attribution captured via `_agent_to_skill` snapshot map at spawn time,
+    enabling async token attribution even when subagent messages arrive across turn
+    boundaries
+  - `Total` row calculated as leaf sum only (no double-counting): `token_main` +
+    standalone agents + all skill sub-agents = `token_total`
+- **`subagent_meta_link` event type** — new parser event that maps hex agent IDs to
+  OMC names via `.meta.json` sidecars. `SubagentWatcherManager` emits this event on
+  file discovery so team agent nodes are created with their `input.name` label.
 
 ### Changed
 
@@ -28,19 +43,27 @@ user-visible behavior changes, PATCH bumps ship fixes only.
   - `token_agents_standalone: dict` — standalone agent ID → agent label + tokens
 - **`CallGraph` dataclass** — one new field:
   - `_agent_to_skill: dict[str, str]` — snapshot map of agent_node_id → skill_node_id,
-    captured at spawn time. Session-scoped, unaffected by turn boundaries (supports async
-    token arrival across turns).
+    captured at spawn time. Session-scoped, unaffected by turn boundaries.
 - **`get_turn_summary()` return dict** (additive):
   - Now includes `token_skill_tree` and `token_agents_standalone` alongside existing
-    `token_total`, `token_main`, `token_nodes` (for backward compatibility).
+    `token_total`, `token_main`, `token_nodes` (backward compatible).
   - Legacy fallback: if skill tree is empty, existing `token_nodes` list is returned
     (no change for existing panel code).
+- **`_SYSTEM_USER_PREFIXES`** — `<teammate-message` prefix added, preventing team
+  execution turns from splitting into spurious turn boundaries (265, 266, ...).
 
 ### Fixed
 
+- **OMC team agent token attribution** — native team agents send `agent_id: name@team`
+  in `tool_result` rather than a hex hash. The new `subagent_meta_link` / `.meta.json`
+  pipeline resolves hex→name at file-discovery time so flowchart nodes display the
+  agent's actual OMC name (`verifier-a`, `executor`, etc.) instead of being unlinked.
+  Lazy resolve handles race conditions where the meta file arrives after the first event.
 - **Subagent token attribution in hierarchical context** — tokens for agents spawned
   within skill spans now correctly route to the skill's sub-agent bucket instead of
   top-level standings, preventing skill context loss.
+- **Teammate-message turns** — `<teammate-message` prefixed user rows no longer
+  create spurious turn boundaries during OMC team execution.
 
 ---
 

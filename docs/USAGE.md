@@ -1,4 +1,4 @@
-# agentlens 사용 가이드 (v0.2.0)
+# agentlens 사용 가이드 (v0.8.1)
 
 Claude Code 세션 JSONL 을 실시간 tail 해서 **Timeline + 라이브 Flowchart** 두 패널로
 보여주는 Python + Textual TUI. 서브에이전트 호출, 스킬 호출, 병렬 spawn 까지 그래프로
@@ -223,6 +223,7 @@ Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트
 플러시 필터는 시스템 주입 메시지를 걸러냅니다:
 - `<task-notification>` (백그라운드 작업 완료 알림)
 - `<system-reminder>` (hook 주입)
+- `<teammate-message` (OMC 팀 에이전트 간 메시지, v0.8.1+)
 - `Base directory for this skill:` (skill 확장 프리앰블)
 - `isMeta=True` 행
 - 서브에이전트 파일 자체의 user row (서브에이전트가 받은 초기 프롬프트)
@@ -391,7 +392,7 @@ _render_text → Rich Text on Static
 | `app.py` | Textual App, 패널 composition, worker 기동, 키 바인딩 |
 | `parser.py` | JSONL line → HarnessEvent (schema-tolerant) |
 | `watcher.py` | `PollingTailer` / `WatchfilesTailer` + rotation 감지 (inode/size/head fingerprint 3중) |
-| `subagent_watcher.py` | 서브에이전트 dir polling → 개별 파일 tail |
+| `subagent_watcher.py` | 서브에이전트 dir polling → 개별 파일 tail + `.meta.json` 읽어 `subagent_meta_link` 이벤트 발송 (팀 에이전트 name 해상도) |
 | `subagent_locator.py` | 서브에이전트 파일 목록 |
 | `locator.py` | 메인 세션 파일 탐색 (slug + newest-mtime fallback) |
 | `graph_model.py` | `CallGraph` + `Node` + `Instance` + sticky running + nested spawn |
@@ -423,7 +424,7 @@ python scripts/fake_session.py --target /tmp/fake.jsonl --count 200 --rate 10 --
 ## 9. 테스트 실행
 
 ```bash
-pytest -q                                # 전체 (177 tests)
+pytest -q                                # 전체 (235 tests)
 pytest -q tests/test_parser.py
 pytest -q tests/test_instance_view.py
 pytest -q tests/test_flowchart_panel.py
