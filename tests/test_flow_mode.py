@@ -9,7 +9,7 @@ import pytest
 
 from agentlens.app import AgentlensApp
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import ROOT_ID, CallGraph, Edge, FlowRecord, Instance, Node
+from agentlens.graph_model import ROOT_ID, CallGraph
 from agentlens.panels.flowchart import FlowchartPanel
 
 
@@ -330,7 +330,7 @@ def test_flow_sequential_after_parallel_joins() -> None:
         key=lambda nid: sub.nodes[nid].last_ts,
     )
     assert len(flow_ids) == 3
-    vid_a, vid_b, vid_c = flow_ids[0], flow_ids[1], flow_ids[2]
+    _, vid_b, vid_c = flow_ids[0], flow_ids[1], flow_ids[2]
 
     # C starts at ts=10. Both A (end=5) and B (end=8) are completed.
     # B finished last, so C's parent should be B's vid.

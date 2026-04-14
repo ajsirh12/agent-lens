@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import MAX_BREAKDOWN_TOOLS, ROOT_ID, CallGraph
+from agentlens.graph_model import MAX_BREAKDOWN_TOOLS, CallGraph
 from agentlens.parser import parse_line
 
 

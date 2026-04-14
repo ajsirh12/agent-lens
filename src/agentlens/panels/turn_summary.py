@@ -1,0 +1,234 @@
+"""TurnSummaryScreen — modal showing aggregate stats for a single turn.
+
+Triggered by pressing Enter on a turn marker row in the Timeline.
+Lists agent/skill invocations with their duration and status, total
+turn duration, error count, and the user prompt preview.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+from textual.app import ComposeResult
+from textual.containers import Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Static
+
+_TOP_N_TOOL = 8
+_TOP_N_MCP = 6
+_TOP_N_HOOK = 5
+
+
+def _sanitize(s: object) -> str:
+    text = str(s)
+    text = "".join(c for c in text if (c.isprintable() or c == "\t") and c not in "\x1b\r")
+    return text[:500]
+
+
+def _fmt_dur(seconds: float) -> str:
+    if seconds <= 0:
+        return "-"
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m = int(seconds // 60)
+    s = seconds - m * 60
+    return f"{m}m{s:.0f}s"
+
+
+def _trunc(text: str, width: int) -> str:
+    """Truncate to width chars, appending ellipsis if needed."""
+    if len(text) <= width:
+        return text
+    return text[: width - 1] + "\u2026"
+
+
+def _fmt_ms(ms: int) -> str:
+    """Format milliseconds as human-readable duration."""
+    if ms <= 0:
+        return "-"
+    if ms < 1000:
+        return f"{ms}ms"
+    s = ms / 1000.0
+    if s < 60:
+        return f"{s:.1f}s"
+    m = int(s // 60)
+    return f"{m}m{s - m * 60:.0f}s"
+
+
+def _mcp_display(server: str, tool: str) -> str:
+    """Format server\xb7tool, truncating to 38 chars."""
+    combined = f"{server}\u00b7{tool}"
+    return _trunc(combined, 38)
+
+
+def _build_lines(s: dict[str, Any]) -> list[str]:
+    """Build the ordered list of text lines for the modal body.
+
+    Returns plain markup strings (no Static wrappers) so the function
+    can be unit-tested without a running Textual app.
+    """
+    lines: list[str] = []
+
+    index = int(s.get("index", 0))
+    prompt = _sanitize(s.get("prompt", ""))
+    duration = float(s.get("duration_s", 0.0))
+    agent_count = int(s.get("agent_count", 0))
+    skill_count = int(s.get("skill_count", 0))
+    error_count = int(s.get("error_count", 0))
+    total_agent_dur = float(s.get("total_agent_duration_s", 0.0))
+    is_live = s.get("end_ts") is None
+
+    header_parts = [f"Turn {index + 1}"]
+    if is_live:
+        header_parts.append("(LIVE)")
+    header = " ".join(header_parts)
+
+    lines.append(f"[bold]{header}[/bold]")
+    lines.append(f"Prompt:   {prompt if prompt else '(empty)'}")
+    lines.append(
+        f"Duration: {_fmt_dur(duration)}"
+        f"   Agents: {agent_count}"
+        f"   Skills: {skill_count}"
+        f"   Errors: {error_count}"
+    )
+    if total_agent_dur > 0:
+        lines.append(
+            f"Total agent time: {_fmt_dur(total_agent_dur)}"
+            + (
+                f" (parallelism: {total_agent_dur / duration:.1f}x)"
+                if duration > 0
+                else ""
+            )
+        )
+    lines.append("")
+
+    # --- Agents / Skills ---
+    agents = s.get("agents", []) or []
+    if not agents:
+        lines.append("(no agent or skill invocations)")
+    else:
+        lines.append("[bold]Agents / Skills[/bold]")
+        for i, a in enumerate(agents):
+            if i >= 30:
+                lines.append(f"  ... +{len(agents) - 30} more")
+                break
+            label = _sanitize(a.get("label", ""))
+            desc = _sanitize(a.get("description", ""))
+            node_type = str(a.get("node_type", ""))
+            status = str(a.get("status", ""))
+            dur = _fmt_dur(float(a.get("duration_s", 0.0)))
+            is_bg = bool(a.get("is_background", False))
+            prefix = "skill" if node_type == "skill" else "agent"
+            bg_tag = " [bg]" if is_bg else ""
+            status_tag = ""
+            if status == "error":
+                status_tag = " [red]✗[/red]"
+            elif status == "done":
+                status_tag = " [dim]✓[/dim]"
+            elif status == "running":
+                status_tag = " [green]▶[/green]"
+            shown_desc = desc if desc else label
+            lines.append(
+                f"  [{prefix}] {shown_desc} "
+                f"[dim]({label})[/dim] "
+                f"[{dur}]{bg_tag}{status_tag}"
+            )
+
+    # --- Tool Usage section ---
+    tool_usage = s.get("tool_usage", []) or []
+    tool_total = int(s.get("tool_total", 0))
+    if tool_usage and tool_total > 0:
+        lines.append("")
+        lines.append(f"[bold]Tool Usage ({tool_total} calls)[/bold]")
+        shown = tool_usage[:_TOP_N_TOOL]
+        for item in shown:
+            name = _trunc(_sanitize(item.get("name", "")), 14)
+            count = int(item.get("count", 0))
+            lines.append(f"  {name:<14} \u00d7{count}")
+        overflow = len(tool_usage) - len(shown)
+        if overflow > 0:
+            lines.append(f"  ... +{overflow} more")
+
+    # --- MCP section ---
+    mcp_usage = s.get("mcp_usage", []) or []
+    mcp_total = int(s.get("mcp_total", 0))
+    if mcp_usage and mcp_total > 0:
+        lines.append("")
+        lines.append(f"[bold]MCP ({mcp_total} calls)[/bold]")
+        shown_mcp = mcp_usage[:_TOP_N_MCP]
+        for item in shown_mcp:
+            server = _sanitize(item.get("server", ""))
+            tool_name = _sanitize(item.get("tool", ""))
+            count = int(item.get("count", 0))
+            display = _mcp_display(server, tool_name)
+            lines.append(f"  {display:<38} \u00d7{count}")
+        mcp_overflow = len(mcp_usage) - len(shown_mcp)
+        if mcp_overflow > 0:
+            lines.append(f"  ... +{mcp_overflow} more")
+
+    # --- Hooks section ---
+    hook_usage = s.get("hook_usage", []) or []
+    hook_runs = int(s.get("hook_runs", s.get("hook_total", 0)))
+    hook_errors = int(s.get("hook_errors_total", s.get("hook_error_total", 0)))
+    hook_duration_ms = int(s.get("hook_duration_ms", 0))
+    hooks_configured = s.get("hooks_configured")
+    show_hooks = hook_runs > 0 or hooks_configured is True
+    if show_hooks:
+        lines.append("")
+        if hook_errors > 0:
+            err_part = f", [red]{hook_errors} errors[/red]"
+        else:
+            err_part = f", {hook_errors} errors"
+        dur_part = (
+            f"  {_fmt_ms(hook_duration_ms)}" if hook_duration_ms > 0 else ""
+        )
+        lines.append(
+            f"[bold]Hooks ({hook_runs} events{err_part}){dur_part}[/bold]"
+        )
+        if hook_runs == 0:
+            lines.append("  [dim](no hook fired this turn)[/dim]")
+        else:
+            shown_hooks = hook_usage[:_TOP_N_HOOK]
+            for item in shown_hooks:
+                event_name = _trunc(_sanitize(item.get("event", "Stop")), 14)
+                raw_script = _sanitize(item.get("script", ""))
+                script = os.path.basename(raw_script) or "(anonymous)"
+                script = _trunc(script, 24)
+                count = int(item.get("count", 0))
+                err_count = int(item.get("error_count", 0))
+                err_tag = (
+                    f" [red]\u2717{err_count}[/red]" if err_count > 0 else ""
+                )
+                lines.append(
+                    f"  {event_name:<14} {script:<24} \u00d7{count}{err_tag}"
+                )
+            hook_overflow = len(hook_usage) - len(shown_hooks)
+            if hook_overflow > 0:
+                lines.append(f"  ... +{hook_overflow} more")
+
+    lines.append("")
+    lines.append("(Esc / Enter to close)")
+    return lines
+
+
+class TurnSummaryScreen(ModalScreen[None]):
+    """Modal showing a summary of a single turn's orchestration."""
+
+    BINDINGS = [("escape", "dismiss", "Close"), ("enter", "dismiss", "Close")]
+
+    def __init__(self, summary: dict[str, Any]) -> None:
+        super().__init__()
+        self.summary = summary
+
+    def compose(self) -> ComposeResult:
+        lines = _build_lines(self.summary)
+        with Vertical(id="turn-summary-body"):
+            for line in lines:
+                if line == "(no agent or skill invocations)" or line == "(Esc / Enter to close)":
+                    yield Static(line, classes="placeholder")
+                else:
+                    yield Static(line)
+
+    def action_dismiss(self) -> None:  # type: ignore[override]
+        self.dismiss(None)

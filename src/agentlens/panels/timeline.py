@@ -360,6 +360,40 @@ class TimelinePanel(Container):
         except Exception:
             return None
 
+    def get_selected_turn_index(self) -> int | None:
+        """Return the turn index if the current row is a turn marker, else None.
+
+        Turn markers carry ``_row_agent[row_key] == "__turn:<N>"`` where
+        N is 1-indexed (human display). This method converts back to the
+        0-indexed ``turn_index`` used by graph_model/FlowRecord.
+
+        Uses the DataTable's row_key lookup (not dict order) so it is
+        robust against row deletions from MAX_PENDING FIFO eviction.
+        """
+        if self._table is None:
+            return None
+        try:
+            cursor_row = self._table.cursor_row
+            # Find the row_key whose display index equals cursor_row.
+            # _row_agent keys are a superset of turn marker rows — scan
+            # only those (fast because turn markers are rare).
+            for rk, val in self._row_agent.items():
+                if not isinstance(val, str) or not val.startswith("__turn:"):
+                    continue
+                try:
+                    idx = self._table.get_row_index(rk)
+                except Exception:
+                    continue
+                if idx == cursor_row:
+                    try:
+                        human_num = int(val.split(":", 1)[1])
+                        return human_num - 1  # 1-indexed → 0-indexed
+                    except ValueError:
+                        return None
+            return None
+        except Exception:
+            return None
+
     def clear(self) -> None:
         """Reset the timeline to an empty state. Safe to call pre-mount."""
         self._pending_use = {}

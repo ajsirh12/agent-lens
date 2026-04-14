@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from agentlens.events import EventType, HarnessEvent
-from agentlens.panels.timeline import MAX_PENDING, TimelinePanel
+from agentlens.panels.timeline import MAX_PENDING
 
 
 def _make_event(
@@ -65,7 +64,7 @@ async def test_timeline_sanitizes_ansi_escape_in_cells(tmp_path: Path) -> None:
         # Inspect via public method
         # Move cursor to the row and check cells
         assert timeline._table is not None
-        cells = timeline.get_selected_row_cells()
+        timeline.get_selected_row_cells()
         # cells could be None if cursor not on our row yet; check the row directly
         # via _table rows
         rows = list(timeline._table.rows.keys())
@@ -287,6 +286,5 @@ async def test_orphan_result_has_completion_prefix(tmp_path: Path) -> None:
         assert timeline._table is not None
         rows = list(timeline._table.rows.keys())
         assert len(rows) == 1
-        row_key = rows[0]
         tool_cell = str(timeline._table.get_cell_at((0, 1)))
         assert tool_cell.startswith("✓ "), f"Expected '✓ ' prefix, got: {tool_cell!r}"

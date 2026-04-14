@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .graph_model import ROOT_ID, CallGraph, Node
+from .graph_model import CallGraph, Node
 
 
 @dataclass

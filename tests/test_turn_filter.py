@@ -9,7 +9,7 @@ import pytest
 
 from agentlens.app import AgentlensApp
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import ROOT_ID, CallGraph, FlowRecord
+from agentlens.graph_model import ROOT_ID, CallGraph
 from agentlens.panels.flowchart import FlowchartPanel
 
 

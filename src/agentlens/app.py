@@ -300,6 +300,14 @@ class AgentlensApp(App[int]):
     def action_show_detail(self) -> None:
         if self._timeline is None:
             return
+        # Turn marker rows get a dedicated summary modal instead of the
+        # generic tool detail screen. Check this before falling through.
+        turn_idx = self._timeline.get_selected_turn_index()
+        if turn_idx is not None and self._flowchart is not None:
+            summary = self._flowchart._graph.get_turn_summary(turn_idx)
+            from .panels.turn_summary import TurnSummaryScreen
+            self.push_screen(TurnSummaryScreen(summary))
+            return
         cells = self._timeline.get_selected_row_cells()
         if cells is None:
             return

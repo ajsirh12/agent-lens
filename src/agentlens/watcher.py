@@ -8,16 +8,16 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-# A single line exceeding 1 MiB is either corrupted or adversarial; discard
-# rather than OOM.
-MAX_BUFFER_BYTES = 1_048_576
-
 from .bus import EventBus
 from .events import HarnessEvent
 from .parser import parse_line
 
 if TYPE_CHECKING:
     from .app import AgentlensApp
+
+# A single line exceeding 1 MiB is either corrupted or adversarial; discard
+# rather than OOM.
+MAX_BUFFER_BYTES = 1_048_576
 
 log = logging.getLogger(__name__)
 

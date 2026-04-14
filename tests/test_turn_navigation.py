@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import CallGraph, TurnRecord, _is_real_user_prompt
+from agentlens.graph_model import CallGraph
 
 
 def _real_user_message(text: str = "Hello world", ts: datetime | None = None) -> HarnessEvent:

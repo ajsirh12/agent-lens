@@ -24,6 +24,7 @@ class EventType(str, Enum):
     attachment = "attachment"
     task_notification = "task_notification"
     permission_mode = "permission_mode"
+    hook_summary = "hook_summary"
     unknown = "unknown"
 
 

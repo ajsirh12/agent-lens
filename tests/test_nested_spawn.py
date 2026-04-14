@@ -15,7 +15,6 @@ from agentlens.graph_model import (
     MAX_NESTED_DEPTH,
     ROOT_ID,
     CallGraph,
-    Node,
 )
 from agentlens import graph_model as gm
 

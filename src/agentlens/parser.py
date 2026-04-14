@@ -7,6 +7,7 @@ with type=EventType.unknown. Never raises to callers. See AC10.
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import re
@@ -20,6 +21,10 @@ log = logging.getLogger(__name__)
 # Cap raw_line storage: a 50 MB line held by thousands of timeline rows would
 # cause multi-GB retention. 8 KiB is sufficient for debugging.
 MAX_RAW_LINE = 8192
+
+# Per-event cap on number of hookInfos list elements we retain. Protects
+# against adversarial payloads with unbounded hook info arrays.
+MAX_HOOK_INFOS = 50
 
 
 def _truncate(s: str) -> str:
@@ -67,8 +72,74 @@ SUPPORTED_TOP_TYPES = {
     "attachment",
     "permission-mode",
     "queue-operation",
+    "system",
 }
 SUPPORTED_CONTENT_TYPES = {"text", "thinking", "tool_use", "tool_result"}
+
+
+def _parse_hook_infos(value: Any) -> list[dict[str, Any]]:
+    """Extract a capped list of ``{command, durationMs}`` dicts.
+
+    Defensive: accepts an already-decoded list, a JSON string, or a
+    Python repr string (ast.literal_eval fallback). Returns an empty
+    list for anything else. Per-element partial counting: dict
+    elements missing a str ``command`` are skipped silently so a
+    single bad element never discards the whole event (D-1).
+    """
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            try:
+                decoded = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                log.debug("hookInfos unparseable string payload")
+                return []
+        value = decoded
+    if not isinstance(value, list):
+        log.debug("hookInfos not a list: %r", type(value).__name__)
+        return []
+    out: list[dict[str, Any]] = []
+    for item in value[:MAX_HOOK_INFOS]:
+        if not isinstance(item, dict):
+            continue
+        cmd = item.get("command")
+        if not isinstance(cmd, str):
+            continue
+        dur = item.get("durationMs", 0)
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)):
+            dur_int = 0
+        else:
+            dur_int = int(dur)
+        out.append({"command": cmd, "durationMs": dur_int})
+    return out
+
+
+def _coerce_hook_errors(value: Any) -> int:
+    """Normalize hookErrors (list / int / bool / str) → int count.
+
+    Current observed data always has ``[]`` (empty list). Defensive
+    handling covers future schema drift (see schema report §3.5).
+    """
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, int):
+        return max(0, value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or stripped in ("[]", "''", '""'):
+            return 0
+        try:
+            decoded = json.loads(stripped)
+        except (json.JSONDecodeError, ValueError):
+            try:
+                decoded = ast.literal_eval(stripped)
+            except (ValueError, SyntaxError):
+                return 0
+        return _coerce_hook_errors(decoded)
+    return 0
 
 
 def _parse_ts(raw: Any) -> datetime:
@@ -199,6 +270,58 @@ def parse_line(line: str) -> list[HarnessEvent]:
             )
         ]
 
+    if top_type == "system":
+        subtype = obj.get("subtype")
+        if subtype == "stop_hook_summary":
+            hook_infos = _parse_hook_infos(obj.get("hookInfos"))
+            hook_errors = _coerce_hook_errors(obj.get("hookErrors", 0))
+            hook_count_raw = obj.get("hookCount", 0)
+            if isinstance(hook_count_raw, bool) or not isinstance(
+                hook_count_raw, (int, float)
+            ):
+                hook_count = 0
+            else:
+                hook_count = int(hook_count_raw)
+            stop_reason_raw = obj.get("stopReason")
+            stop_reason = (
+                stop_reason_raw
+                if isinstance(stop_reason_raw, str) and stop_reason_raw
+                else None
+            )
+            tool_use_id_raw = obj.get("toolUseID")
+            tool_use_id = (
+                str(tool_use_id_raw) if tool_use_id_raw else None
+            )
+            return [
+                HarnessEvent(
+                    type=EventType.hook_summary,
+                    ts=ts,
+                    agent_id=agent_id,
+                    payload={
+                        "hook_count": hook_count,
+                        "hook_errors": hook_errors,
+                        "hook_infos": hook_infos,
+                        "prevented_continuation": bool(
+                            obj.get("preventedContinuation", False)
+                        ),
+                        "stop_reason": stop_reason,
+                        "tool_use_id": tool_use_id,
+                    },
+                    raw_line=_truncate(line),
+                )
+            ]
+        # Other system subtypes (turn_duration, compactMetadata, retry)
+        # intentionally drop to unknown in v1.
+        return [
+            HarnessEvent(
+                type=EventType.unknown,
+                ts=ts,
+                agent_id=agent_id,
+                payload={"top_type": "system", "subtype": subtype},
+                raw_line=_truncate(line),
+            )
+        ]
+
     if top_type == "queue-operation":
         op = obj.get("operation")
         content_str = obj.get("content")
@@ -255,6 +378,11 @@ def parse_line(line: str) -> list[HarnessEvent]:
             )
             continue
         if bt == "tool_use":
+            tool_name_raw = block.get("name")
+            is_mcp = (
+                isinstance(tool_name_raw, str)
+                and tool_name_raw.startswith("mcp__")
+            )
             out.append(
                 HarnessEvent(
                     type=EventType.tool_use,
@@ -262,10 +390,11 @@ def parse_line(line: str) -> list[HarnessEvent]:
                     agent_id=agent_id,
                     payload={
                         "tool_use_id": block.get("id"),
-                        "tool_name": block.get("name"),
+                        "tool_name": tool_name_raw,
                         "input": block.get("input"),
                         "parent_tool_use_id": block.get("parent_tool_use_id"),
                         "uuid": obj.get("uuid"),
+                        "is_mcp": is_mcp,
                     },
                     raw_line=_truncate(line),
                 )

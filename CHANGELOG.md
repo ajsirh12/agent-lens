@@ -8,6 +8,53 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [0.7.0] - 2026-04-14
+
+Turn Summary modal now shows Tool Usage, MCP tools, and Hooks breakdown.
+Parser gains support for `type:"system"` top-level events to collect hook
+summary data. 223 tests passing (+22).
+
+### Added
+
+- **Turn Summary modal — three new conditional sections** (Tool Usage, MCP,
+  Hooks) displayed after Agents/Skills. Shown only when data is present.
+- **`EventType.hook_summary`** — new event type emitted by parser on
+  `type:"system"` with `subtype:"stop_hook_summary"`.
+- **`_parse_hook_infos()` and `_coerce_hook_errors()`** — defensive
+  multi-format parsers for hook infos JSON (list / repr string / raw JSON)
+  and hook error counts (int / list / bool / str), with empty fallback.
+- **`MAX_HOOK_INFOS = 50`** — cap on raw hook summary snapshots per turn.
+- **`TurnRecord` fields extended** — `tool_calls`, `mcp_calls`, `hook_events`,
+  `hook_errors`, `hook_by_command`, `hook_infos_raw` for per-turn summaries.
+  Overflow tracking via `tool_overflow_names`, `mcp_overflow_names`,
+  `hook_overflow_names`.
+- **`get_turn_summary()` return dict extended** (additive, AC-11):
+  - `tool_usage: list[{name, count}]` — top-8 tools sorted by count desc, name asc
+  - `mcp_usage: list[{server, tool, full_name, count}]` — MCP tools (mcp__server__short split on first `__` after prefix)
+  - `hook_usage: list[{event, script, command, count, error_count, total_ms}]` — top-5 hooks sorted by count desc, total_ms desc (tiebreaker)
+  - `hooks_configured: bool` — best-effort probe of `.claude/settings.json` (v1: False fixed, graceful fallback on error)
+  - Totals: `tool_total`, `mcp_total`, `hook_total`, `hook_runs`, `hook_errors_total`, `hook_duration_ms`
+  - Overflow counts: `tool_overflow`, `mcp_overflow`, `hook_overflow`
+- **Timestamp-based turn attribution** — hook summary events routed to turns
+  via `_find_turn_by_timestamp()` (reverse linear scan, -1 pre-first-turn).
+- **MCP full-name preservation** — `is_mcp` flag + `mcp__server__tool` pattern
+  with explicit server/tool split (spec §5.4).
+
+### Fixed
+
+- **Parser now routes `type:"system"` events** instead of dropping them as
+  unknown. Supports `subtype:"stop_hook_summary"` with full payload; other
+  subtypes (turn_duration, compactMetadata, retry) silently dropped as unknown
+  (v1 no-op).
+
+### Tests
+
+- Full suite: 201 → **223 passing** (+22). New tests cover hook summary
+  parsing, turn attribution, overflow caps, MCP split logic, and Turn Summary
+  modal rendering with Tool Usage / MCP / Hooks sections.
+
+---
+
 ## [0.6.0] - 2026-04-13
 
 Background agent completion tracking, parallel fork/join accuracy, and

@@ -25,6 +25,7 @@ was present and contained the single observed session file above.
 | `file-history-snapshot` | 2     | Tracks file edit snapshots; not user-visible in UI          |
 | `attachment`            | 2     | Attached file metadata                                      |
 | `permission-mode`       | 1     | `{type, permissionMode, sessionId}` — one-shot              |
+| `system`                | varies | Hook summary / metadata events (v0.7.0+) — see §2.1b        |
 
 ## Common top-level keys (present on most rows)
 
@@ -131,6 +132,61 @@ following heuristic (see `parser.py::_agent_id_from`):
 | Timeline dur_ms   | monotonic delta between matching tool_use / tool_result by `tool_use_id`|
 | AgentTree label   | `obj.sessionId[:8]` or tool input `subagent_type`                      |
 
+## "system" top-level type (v0.7.0+)
+
+The parser now collects `type:"system"` events that carry hook summary data.
+
+**Subtypes:**
+- `stop_hook_summary` — supported; emits `EventType.hook_summary`
+- `turn_duration`, `compactMetadata`, `retry` — present in some sessions but
+  unsupported in v0.7.0; silently dropped as unknown
+
+### stop_hook_summary schema
+
+Payload when `type:"system"` + `subtype:"stop_hook_summary"`:
+
+```json
+{
+  "hookInfos": [
+    {"command": "...", "durationMs": 123, "hookEventName": "..."},
+    ...
+  ],
+  "hookErrors": 0,
+  "hookCount": 3,
+  "preventedContinuation": false,
+  "stopReason": "some_reason",
+  "level": "info",
+  "hasOutput": true,
+  "toolUseID": "toolu_..."
+}
+```
+
+| field | type | notes |
+|---|---|---|
+| `hookInfos` | list[dict] or JSON string | Each entry: `{command, durationMs, hookEventName}`. May be raw JSON string or Python repr — parser uses `ast.literal_eval` fallback. Capped at `MAX_HOOK_INFOS=50`. |
+| `hookErrors` | int, list, bool, or str | Coerced to int: empty string → 0, `"[]"` → 0, bool → int, list/JSON → count. |
+| `hookCount` | int | Total hook invocations in this turn. |
+| `preventedContinuation` | bool | Whether this hook stopped the session flow. |
+| `stopReason` | str | Label for the stop event (used in event_type fallback). |
+| `toolUseID` | str | ID of the tool that triggered the hook (used for turn attribution via timestamp). |
+
+**Turn attribution:** Hook summary events are routed to turns via timestamp-based
+lookup (`_find_turn_by_timestamp`). If no turn contains the event's timestamp,
+it is silently dropped (pre-first-turn safety, D-3).
+
+## MCP tool_use handling (v0.7.0+)
+
+Tools with names matching `mcp__<server>__<short>` are now collected in a
+separate `mcp_calls` section of `TurnRecord` and included in the Turn Summary
+modal under "MCP" (not "Tool Usage").
+
+**Pattern:** `mcp__<server>__<tool>` → split on **first `__` after prefix**:
+- Server: `<server>` (text before second `__`)
+- Tool: `<tool>` (text after second `__`)
+- Full name preserved for debugging/tooltips
+
+Example: `mcp__postgres__query_table` → server=`postgres`, tool=`query_table`.
+
 ## `SUPPORTED_TYPES`
 
 Derived directly from the observed counts above:
@@ -138,7 +194,7 @@ Derived directly from the observed counts above:
 ```python
 SUPPORTED_TYPES = {
     "assistant", "user", "file-history-snapshot",
-    "attachment", "permission-mode",
+    "attachment", "permission-mode", "system",
 }
 SUPPORTED_CONTENT_TYPES = {
     "text", "thinking", "tool_use", "tool_result",

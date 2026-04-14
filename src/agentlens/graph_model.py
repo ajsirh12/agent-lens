@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 from .events import EventType, HarnessEvent
 
@@ -30,6 +30,23 @@ class TurnRecord:
     start_ts: float     # timestamp of the user_message that started this turn
     end_ts: float | None = None  # timestamp of next turn's start (None = current/live)
     prompt_preview: str = ""     # first 40 chars of user prompt
+    # Per-turn aggregates (all capped at MAX_BREAKDOWN_TOOLS for dict
+    # fields; raw hookInfos snapshot capped at MAX_HOOK_INFOS). Agent /
+    # Task / Skill and MCP tools are NOT counted in tool_calls.
+    tool_calls: dict[str, int] = field(default_factory=dict)
+    mcp_calls: dict[str, int] = field(default_factory=dict)
+    hook_events: int = 0
+    hook_errors: int = 0
+    # command → {"count": int, "total_ms": int, "error_count": int,
+    #            "event_type": str}
+    hook_by_command: dict[str, dict] = field(default_factory=dict)
+    hook_infos_raw: list[dict] = field(default_factory=list)
+    # Counters for unique-name drops once the cap is hit. Used by
+    # get_turn_summary() to populate the ``*_overflow`` fields so the UI
+    # can render "+M more" suffixes. Track unique names, not total calls.
+    tool_overflow_names: set[str] = field(default_factory=set)
+    mcp_overflow_names: set[str] = field(default_factory=set)
+    hook_overflow_names: set[str] = field(default_factory=set)
 
 ROOT_ID = "main"
 
@@ -81,6 +98,10 @@ def _display_label(name: str) -> str:
 # Maximum number of distinct tool types tracked per subagent breakdown.
 # Caps memory growth when fed untrusted / extremely diverse payloads.
 MAX_BREAKDOWN_TOOLS = 20
+
+# Per-turn cap on raw hookInfos snapshot retention. Mirrors parser.MAX_HOOK_INFOS
+# so a single turn can never retain an unbounded number of hook entries.
+MAX_HOOK_INFOS = 50
 
 
 # Text patterns Claude Code injects into user rows that LOOK like user
@@ -272,6 +293,8 @@ class CallGraph:
             return self._handle_tool_result(ev)
         if ev.type == EventType.task_notification:
             return self._handle_task_notification(ev)
+        if ev.type == EventType.hook_summary:
+            return self._handle_hook_summary(ev)
         if ev.type == EventType.user_message:
             # Events originating from a subagent JSONL file carry a
             # subagent_uuid — these are the initial prompt the main
@@ -322,6 +345,29 @@ class CallGraph:
 
     def _handle_tool_use(self, ev: HarnessEvent) -> bool:
         tool = ev.tool_name
+        # === Per-turn attribution MUST run before Agent/Task/Skill filter.
+        # MCP and regular tool_use events would otherwise be dropped here
+        # and never counted. subagent_uuid events are routed to
+        # _handle_subagent_tool_use by the dispatcher, so this branch only
+        # ever sees main-thread tool_use calls (D-2 preserved). Pre-first-
+        # turn events (turn_index == -1) are silently skipped (D-3).
+        is_mcp = bool(ev.payload.get("is_mcp", False))
+        if self._current_turn_index >= 0 and isinstance(tool, str) and tool:
+            try:
+                turn = self._turns[self._current_turn_index]
+            except IndexError:
+                turn = None
+            if turn is not None:
+                if is_mcp:
+                    self._bump_capped(
+                        turn.mcp_calls, tool, turn.mcp_overflow_names
+                    )
+                elif tool not in ("Agent", "Task", "Skill"):
+                    self._bump_capped(
+                        turn.tool_calls, tool, turn.tool_overflow_names
+                    )
+        # === end per-turn attribution ===
+
         # Claude Code historically used "Task" for subagent spawns; the
         # current harness uses "Agent". Both share the same input shape
         # (a `subagent_type` field), so we accept either.
@@ -765,6 +811,363 @@ class CallGraph:
             return {r.node_id for r in self._flow_history if r.turn_index == turn_index}
         except Exception:
             return set()
+
+    def get_turn_summary(self, turn_index: int) -> dict[str, Any]:
+        """Return a summary dict for a single turn.
+
+        Keys:
+          - index: 0-based turn index
+          - prompt: truncated user prompt
+          - start_ts / end_ts: floats (end_ts is None if this is the live turn)
+          - duration_s: seconds (0 if end_ts unavailable)
+          - agent_count, skill_count, error_count
+          - agents: list of (label, description, duration_s, status, is_background)
+          - total_agent_duration_s: sum of all child agent/skill durations
+        Never raises.
+        """
+        try:
+            turn = None
+            for t in self._turns:
+                if t.index == turn_index:
+                    turn = t
+                    break
+            recs = self.get_flow_records_for_turn(turn_index)
+
+            duration = 0.0
+            if turn is not None:
+                if turn.end_ts is not None:
+                    duration = max(0.0, turn.end_ts - turn.start_ts)
+                elif recs:
+                    latest_end = max(
+                        (r.ended_ts for r in recs if r.ended_ts is not None),
+                        default=turn.start_ts,
+                    )
+                    duration = max(0.0, latest_end - turn.start_ts)
+
+            agents: list[dict[str, Any]] = []
+            agent_count = 0
+            skill_count = 0
+            error_count = 0
+            total_agent_duration = 0.0
+            for r in recs:
+                if r.node_type == "agent":
+                    agent_count += 1
+                elif r.node_type == "skill":
+                    skill_count += 1
+                if r.status == "error":
+                    error_count += 1
+                dur = 0.0
+                if r.ended_ts is not None:
+                    dur = max(0.0, r.ended_ts - r.started_ts)
+                total_agent_duration += dur
+                agents.append({
+                    "label": r.label,
+                    "description": r.description,
+                    "node_type": r.node_type,
+                    "duration_s": dur,
+                    "status": r.status,
+                    "is_background": r.is_background,
+                })
+
+            # Per-turn tool / mcp / hook aggregates (additive only —
+            # callers relying on the legacy keys still see identical
+            # shape; new keys default to empty/zero when the turn has
+            # no aggregates).
+            tool_usage: list[dict[str, Any]] = []
+            mcp_usage: list[dict[str, Any]] = []
+            hook_usage: list[dict[str, Any]] = []
+            tool_total = 0
+            mcp_total = 0
+            hook_runs_total = 0
+            hook_error_total = 0
+            hook_duration_ms = 0
+            tool_overflow = (
+                len(turn.tool_overflow_names) if turn is not None else 0
+            )
+            mcp_overflow = (
+                len(turn.mcp_overflow_names) if turn is not None else 0
+            )
+            hook_overflow = (
+                len(turn.hook_overflow_names) if turn is not None else 0
+            )
+            hook_total_events = 0
+            if turn is not None:
+                tool_items = sorted(
+                    turn.tool_calls.items(),
+                    key=lambda kv: (-kv[1], kv[0]),
+                )
+                tool_total = sum(turn.tool_calls.values())
+                tool_usage = [
+                    {"name": name, "count": count}
+                    for name, count in tool_items
+                ]
+
+                mcp_items = sorted(
+                    turn.mcp_calls.items(),
+                    key=lambda kv: (-kv[1], kv[0]),
+                )
+                mcp_total = sum(turn.mcp_calls.values())
+                for full_name, count in mcp_items:
+                    server = ""
+                    short = full_name
+                    if full_name.startswith("mcp__"):
+                        rest = full_name[len("mcp__"):]
+                        idx = rest.find("__")
+                        if idx >= 0:
+                            server = rest[:idx]
+                            short = rest[idx + 2:]
+                        else:
+                            server = rest
+                            short = ""
+                    mcp_usage.append({
+                        "server": server,
+                        "tool": short,
+                        "full_name": full_name,
+                        "count": count,
+                    })
+
+                hook_total_events = turn.hook_events
+                hook_error_total = turn.hook_errors
+                hook_items = sorted(
+                    turn.hook_by_command.items(),
+                    key=lambda kv: (
+                        -int(kv[1].get("count", 0) or 0),
+                        -int(kv[1].get("total_ms", 0) or 0),
+                        str(kv[1].get("event_type", "")),
+                        kv[0],
+                    ),
+                )
+                for cmd, data in hook_items:
+                    count = int(data.get("count", 0) or 0)
+                    total_ms = int(data.get("total_ms", 0) or 0)
+                    err_count = int(data.get("error_count", 0) or 0)
+                    event_type = str(data.get("event_type", "Stop") or "Stop")
+                    hook_runs_total += count
+                    hook_duration_ms += total_ms
+                    hook_usage.append({
+                        "event": event_type,
+                        "script": self._script_basename(cmd),
+                        "command": cmd,
+                        "count": count,
+                        "error_count": err_count,
+                        "total_ms": total_ms,
+                    })
+
+            return {
+                "index": turn_index,
+                "prompt": turn.prompt_preview if turn is not None else "",
+                "start_ts": turn.start_ts if turn is not None else 0.0,
+                "end_ts": turn.end_ts if turn is not None else None,
+                "duration_s": duration,
+                "agent_count": agent_count,
+                "skill_count": skill_count,
+                "error_count": error_count,
+                "agents": agents,
+                "total_agent_duration_s": total_agent_duration,
+                # NEW (additive) — see design_spec §2.4 / §6
+                "tool_usage": tool_usage,
+                "mcp_usage": mcp_usage,
+                "hook_usage": hook_usage,
+                "hooks_configured": self._get_hooks_configured(),
+                "tool_total": tool_total,
+                "mcp_total": mcp_total,
+                "hook_total": hook_total_events,
+                "hook_runs": hook_runs_total,
+                "hook_runs_total": hook_runs_total,
+                "hook_errors_total": hook_error_total,
+                "hook_error_total": hook_error_total,
+                "hook_duration_ms": hook_duration_ms,
+                "tool_overflow": tool_overflow,
+                "mcp_overflow": mcp_overflow,
+                "hook_overflow": hook_overflow,
+            }
+        except Exception:
+            return {
+                "index": turn_index,
+                "prompt": "",
+                "start_ts": 0.0,
+                "end_ts": None,
+                "duration_s": 0.0,
+                "agent_count": 0,
+                "skill_count": 0,
+                "error_count": 0,
+                "agents": [],
+                "total_agent_duration_s": 0.0,
+                "tool_usage": [],
+                "mcp_usage": [],
+                "hook_usage": [],
+                "hooks_configured": False,
+                "tool_total": 0,
+                "mcp_total": 0,
+                "hook_total": 0,
+                "hook_runs": 0,
+                "hook_runs_total": 0,
+                "hook_errors_total": 0,
+                "hook_error_total": 0,
+                "hook_duration_ms": 0,
+                "tool_overflow": 0,
+                "mcp_overflow": 0,
+                "hook_overflow": 0,
+            }
+
+    # ------------------------------------------------------------------
+    # Per-turn tool / hook accumulators
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _bump_capped(
+        d: dict[str, int],
+        key: str,
+        overflow: set[str] | None = None,
+    ) -> None:
+        """Increment ``d[key]``; drop unique name if cap hit.
+
+        When a new key would exceed ``MAX_BREAKDOWN_TOOLS``, the name
+        is remembered in ``overflow`` (if provided) so accessors can
+        report how many unique names were suppressed. Repeat drops of
+        the same name do not inflate the count (it is a set).
+        """
+        if key in d:
+            d[key] += 1
+        elif len(d) < MAX_BREAKDOWN_TOOLS:
+            d[key] = 1
+        elif overflow is not None:
+            overflow.add(key)
+
+    def _find_turn_by_timestamp(self, ts_epoch: float) -> int:
+        """Return the turn_index whose ``start_ts <= ts < next.start_ts``.
+
+        Linear reverse scan (turns typically <20 per session). Returns
+        -1 for pre-first-turn events so the caller can drop them
+        silently (D-3).
+        """
+        if not self._turns:
+            return -1
+        if ts_epoch < self._turns[0].start_ts:
+            return -1
+        for i in range(len(self._turns) - 1, -1, -1):
+            if ts_epoch >= self._turns[i].start_ts:
+                return i
+        return -1
+
+    def _handle_hook_summary(self, ev: HarnessEvent) -> bool:
+        """Attribute a stop_hook_summary event to the turn whose time
+        window contains the event timestamp. Pre-first-turn events are
+        silently dropped.
+        """
+        ts_epoch = ev.ts.timestamp() if ev.ts is not None else 0.0
+        turn_idx = self._find_turn_by_timestamp(ts_epoch)
+        if turn_idx < 0:
+            return False
+        try:
+            turn = self._turns[turn_idx]
+        except IndexError:
+            return False
+
+        payload = ev.payload if isinstance(ev.payload, dict) else {}
+        turn.hook_events += 1
+        try:
+            turn.hook_errors += int(payload.get("hook_errors", 0) or 0)
+        except (TypeError, ValueError):
+            pass
+
+        stop_reason = payload.get("stop_reason")
+        default_event_type = (
+            stop_reason if isinstance(stop_reason, str) and stop_reason else "Stop"
+        )
+
+        hook_infos = payload.get("hook_infos")
+        if not isinstance(hook_infos, list):
+            hook_infos = []
+
+        remaining_raw_cap = max(0, MAX_HOOK_INFOS - len(turn.hook_infos_raw))
+        for info in hook_infos:
+            if not isinstance(info, dict):
+                continue
+            cmd = info.get("command")
+            if not isinstance(cmd, str) or not cmd:
+                continue
+            dur_raw = info.get("durationMs", 0)
+            if isinstance(dur_raw, bool) or not isinstance(dur_raw, (int, float)):
+                dur = 0
+            else:
+                dur = int(dur_raw)
+            hook_event_name = info.get("hookEventName")
+            event_type = (
+                hook_event_name
+                if isinstance(hook_event_name, str) and hook_event_name
+                else default_event_type
+            )
+            entry = turn.hook_by_command.get(cmd)
+            if entry is None:
+                if len(turn.hook_by_command) >= MAX_BREAKDOWN_TOOLS:
+                    turn.hook_overflow_names.add(cmd)
+                    continue
+                entry = {
+                    "count": 0,
+                    "total_ms": 0,
+                    "error_count": 0,
+                    "event_type": event_type,
+                }
+                turn.hook_by_command[cmd] = entry
+            entry["count"] += 1
+            entry["total_ms"] += dur
+            if remaining_raw_cap > 0:
+                turn.hook_infos_raw.append(
+                    {"command": cmd, "durationMs": dur, "event_type": event_type}
+                )
+                remaining_raw_cap -= 1
+        return True
+
+    def _get_hooks_configured(self) -> bool:
+        """Best-effort detection of ``.claude/settings.json`` hooks.
+
+        Cached per CallGraph instance; file-system access happens at
+        most once. Failure (missing file, bad JSON, permission error)
+        conservatively returns False so the UI hides the Hooks section.
+        """
+        cached = getattr(self, "_hooks_configured_cache", None)
+        if cached is not None:
+            return cached
+        result = False
+        try:
+            from pathlib import Path
+            import json as _json
+            p = Path(".claude") / "settings.json"
+            if p.is_file():
+                parsed = _json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(parsed, dict) and parsed.get("hooks"):
+                    result = True
+        except Exception:
+            result = False
+        self._hooks_configured_cache = result
+        return result
+
+    @staticmethod
+    def _script_basename(cmd: str) -> str:
+        """Extract a short display name from a hook command string.
+
+        Hooks are typically ``node ... /path/script.mjs ARG1``. We pick
+        the last whitespace-separated token that looks like a script
+        path and return its basename. Fallback: the whole command.
+        """
+        if not isinstance(cmd, str):
+            return ""
+        tokens = cmd.strip().split()
+        if not tokens:
+            return cmd.strip()
+        # Prefer the last token that ends in a code extension.
+        script_exts = (".sh", ".mjs", ".cjs", ".js", ".ts", ".py")
+        for tok in reversed(tokens):
+            stripped = tok.strip('"\'')
+            if stripped.endswith(script_exts):
+                last_slash = max(
+                    stripped.rfind("/"), stripped.rfind("\\")
+                )
+                return stripped[last_slash + 1:] if last_slash >= 0 else stripped
+        # Fall back to basename of the last token.
+        stripped = tokens[-1].strip('"\'')
+        last_slash = max(stripped.rfind("/"), stripped.rfind("\\"))
+        return stripped[last_slash + 1:] if last_slash >= 0 else stripped
 
     def _compute_depths(self) -> dict[str, int]:
         """Back-compat alias for compute_depths()."""

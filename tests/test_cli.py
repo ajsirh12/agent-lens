@@ -1,7 +1,6 @@
 """CLI tests — exit code propagation."""
 from __future__ import annotations
 
-import pytest
 from agentlens import cli
 
 

@@ -89,7 +89,7 @@ agentlens
 | `q` | 종료 |
 | `j` / `↓` | Timeline 커서 아래로 |
 | `k` / `↑` | Timeline 커서 위로 |
-| `Enter` | 선택된 timeline row 의 상세 모달 (tool name / input / status / duration) |
+| `Enter` | **Turn Summary 모달** — turn marker 에서 Agents/Skills + Tool Usage + MCP + Hooks 요약 표시. Timeline row 선택 시 상세 모달 (tool name / input / status / duration) |
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
 | `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
 | `Shift+S` | 경로/세션 ID 붙여넣기 모달 — 임의의 JSONL 파일 또는 session id prefix 로 전환 |
@@ -228,6 +228,50 @@ Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트
 - 서브에이전트 파일 자체의 user row (서브에이전트가 받은 초기 프롬프트)
 
 **진짜 사용자 입력만** 턴 경계를 만듭니다.
+
+### Turn Summary 모달 (v0.7.0+)
+
+Turn marker (Timeline 상의 `▶` user_message row) 에 Enter 를 누르면 **Turn Summary 모달** 이 표시됩니다.
+이 모달은 해당 turn 에서 실행된 Agents/Skills 과 하단의 3개 신규 섹션을 보여줍니다:
+
+**섹션 표시 순서:**
+1. Agents/Skills (기존)
+2. **Tool Usage** — 이 turn 에서 호출된 tool 들 (Read, Edit, Bash 등)
+   - 상위 8개를 count 내림차순, 이름 오름차순으로 정렬
+   - 초과분: `... +N more`
+   - 형식: `  {name:<14} ×{count}`
+3. **MCP** — MCP 프로토콜을 통한 외부 tool 호출 (v0.7.0+)
+   - 상위 6개를 count 내림차순으로 정렬
+   - 형식: `  {server·tool:<38} ×{count}` (U+00B7 separator)
+   - 초과분: `... +N more`
+4. **Hooks** — hook script 실행 요약 (v0.7.0+)
+   - Hook script 가 설정되어 있으면 표시 (`.claude/settings.json` 탐지)
+   - Hook 이 발생하지 않은 경우: `[dim](no hook fired this turn)[/dim]`
+   - Hook 이 발생한 경우: 상위 5개 script (count 내림차순, total_ms 내림차순 tiebreaker)
+   - 형식: `  {event:<14} {script:<24} ×{count}{err_tag}`
+   - `err_tag`: 에러 발생 시 ` [red]✗N[/red]` (N=error count)
+   - Header: 총 실행 횟수 + 총 에러 수 (있을 때만) + 총 duration (있을 때만)
+
+**예시:**
+```
+Turn Summary — turn 2/3
+
+Agents/Skills
+  oh-my-claudecode:executor (x2)
+
+Tool Usage
+  Read         ×8
+  Edit         ×3
+  Bash         ×2
+  ... +2 more
+
+MCP
+  postgres·query_table ×4
+  stripe·charge    ×1
+
+Hooks
+  [dim](no hook fired this turn)[/dim]
+```
 
 ### Mode: All vs Running
 
