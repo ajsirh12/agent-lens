@@ -82,6 +82,9 @@ nested subagent trees and parallel-instance views.
   spans list their sub-agents with 4-space indentation; standalone agents
   appear under a separate `agents (N)` section. Double-counting is
   prevented — `Total` is the leaf sum only.
+- **Activity Sparkline** in the status footer: a rolling 8-bar histogram of
+  events/sec over the last 60 seconds using block characters (▁▂▃▄▅▆▇█),
+  with a `peak: N/s` label. Auto-suppressed on narrow terminals.
 - **Defensive**: schema-tolerant parser (never raises on unknown
   fields), MAX_NODES / MAX_BUFFER_BYTES / MAX_RAW_LINE caps against
   adversarial input, ANSI escape sanitization for terminal safety.
@@ -121,7 +124,7 @@ architecture notes.
 ## Tests
 
 ```bash
-pytest -q           # 235 tests
+pytest -q           # 269 tests
 ```
 
 ## Manual Verification
@@ -160,10 +163,9 @@ polling loop or set_interval rate is ever changed.
 
 ## Status
 
-v0.8.1 — Subagent token breakdown + OMC team agent attribution fix.
-Turn Summary modal now shows per-skill and per-agent token consumption
-in a hierarchy. OMC team agents (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`)
-appear by name in the flowchart via `.meta.json` resolution. Teammate-
-message turns no longer split turn counters. 235 tests passing.
+v0.9.0 — Activity Sparkline in status footer. The footer now shows a
+rolling 8-bar histogram of events/sec over the last 60 seconds using
+Unicode block characters (▁▂▃▄▅▆▇█), with a `peak: N/s` label. Auto-
+suppressed on narrow terminals. 269 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

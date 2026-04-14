@@ -112,3 +112,19 @@ def test_footer_idle_threshold_is_exactly_thirty(
     monkeypatch.setattr(app_module.time, "monotonic", lambda: 130.001)
     app._refresh_idle_footer()
     assert "session idle" in _last_footer_text(app)
+
+
+def test_idle_and_sparkline_coexist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """idle suffix and sparkline peak: 0/s both appear after 31s with no events."""
+    app = _make_app(tmp_path)
+    app.last_event_monotonic = 100.0
+    # 31 seconds elapsed — idle threshold crossed; no events → sparkline is flat.
+    monkeypatch.setattr(app_module.time, "monotonic", lambda: 131.0)
+
+    app._refresh_idle_footer()
+
+    text = _last_footer_text(app)
+    assert "session idle" in text
+    assert "peak: 0/s" in text

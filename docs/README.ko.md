@@ -41,6 +41,7 @@ Claude Code 세션을 실시간으로 모니터링하는 TUI 도구입니다. �
 - **Windows / git-bash 호환성**: slug 디렉터리 조회가 실패하면 로케이터가 각 JSONL의 `cwd` 필드를 기반으로 매칭하는 폴백을 사용하므로, 이 도구가 기본적으로 지원하지 않는 플랫폼에서도 세션이 정상적으로 해결됩니다.
 - **서브에이전트 왓처**: 세션의 `subagents/` 디렉터리 아래에 새 `agent-*.jsonl` 파일이 생성될 때 자동으로 발견하고 테일링합니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`로 스폰된 팀 에이전트는 `.meta.json` 사이드카에서 OMC 이름(예: `verifier-a`, `executor`)으로 해석됩니다.
 - **Turn Summary — 토큰 사용량 분해** (v0.8.1): Turn Summary 모달(`m` 키)에서 스킬 및 에이전트별 토큰 소비량을 계층 구조로 표시합니다. 스킬 스팬은 하위 에이전트를 4칸 들여쓰기로 나열하며, 독립 에이전트는 `agents (N)` 섹션 아래에 표시됩니다. `Total`은 이중 집계를 방지하기 위해 리프 합산값만 사용합니다.
+- **활동량 스파크라인** (Activity Sparkline) in the status footer: 마지막 60초 동안의 이벤트/초를 8단 블록 문자(▁▂▃▄▅▆▇█)로 표시하는 롤링 히스토그램이며, `peak: N/s` 레이블을 포함합니다. 화면이 좁을 때는 자동으로 숨겨집니다.
 - **방어적 설계**: 스키마 허용 파서(알 수 없는 필드에서 예외를 던지지 않음), 적대적 입력에 대한 MAX_NODES / MAX_BUFFER_BYTES / MAX_RAW_LINE 제한, 터미널 안전을 위한 ANSI 이스케이프 문자 제거.
 
 ## 설치
@@ -75,7 +76,7 @@ AGENTLENS_BACKEND=polling agentlens
 ## 테스트
 
 ```bash
-pytest -q           # 235개 테스트
+pytest -q           # 269개 테스트
 ```
 
 ## 수동 검증
@@ -104,6 +105,6 @@ pytest -q           # 235개 테스트
 
 ## 상태
 
-v0.8.1 — 서브에이전트 토큰 분해 + 팀 에이전트 토큰 귀속 수정. Turn Summary 모달에서 스킬/에이전트별 토큰 소비량을 계층 구조로 표시합니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` 팀 에이전트가 `.meta.json` 해석을 통해 플로우차트에 이름으로 표시됩니다. teammate-message 턴이 더 이상 턴 카운터를 분리하지 않습니다. 235개 테스트 통과.
+v0.9.0 — 상태 푸터의 Activity Sparkline. 푸터는 마지막 60초의 이벤트/초를 Unicode 블록 문자(▁▂▃▄▅▆▇█)를 사용한 8단 히스토그램과 `peak: N/s` 레이블로 표시합니다. 화면 폭이 좁을 때 자동으로 숨겨집니다. 269개 테스트 통과.
 
 전체 릴리스 히스토리는 [CHANGELOG.md](../CHANGELOG.md)를 참조하세요.

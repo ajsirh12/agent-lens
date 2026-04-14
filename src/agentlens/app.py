@@ -13,6 +13,7 @@ from textual.reactive import reactive
 from textual.widgets import Static
 from textual.worker import Worker
 
+from .activity_rate import ActivityRate
 from .locator import SessionLocator
 from .messages import HarnessEventMessage
 from .omc_state import OmcStateReader
@@ -93,6 +94,7 @@ class AgentlensApp(App[int]):
         self._watcher_worker: Worker | None = None
         self._subagent_worker: Worker | None = None
         self._active_turn: int | None = None  # None = LIVE (current turn)
+        self._activity: ActivityRate = ActivityRate()
 
     def compose(self) -> ComposeResult:
         with Container(id="main"):
@@ -254,13 +256,27 @@ class AgentlensApp(App[int]):
             return "(none)"
         return self.active_session_path.name
 
+    def _activity_suffix(self, base: str) -> str:
+        """Return '  <sparkline> peak: N/s' or '' if it wouldn't fit.
+
+        never-raise: falls back to '' on any error (width probe, render).
+        """
+        try:
+            seg = self._activity.render()
+            width = self.size.width
+            # +2 accounts for the two leading spaces that join the segment.
+            if width and len(base) + len(seg) + 2 > width:
+                return ""
+            return f"  {seg}"
+        except Exception:
+            return ""
+
     def _update_footer(self) -> None:
         if self._footer is None:
             return
         path = self._short_session_path()
-        self._footer.update(
-            f"session: {path} [{self.locator_reason}]{self._flowchart_counts_suffix()}"
-        )
+        base = f"session: {path} [{self.locator_reason}]{self._flowchart_counts_suffix()}"
+        self._footer.update(f"{base}{self._activity_suffix(base)}")
 
     def _refresh_idle_footer(self) -> None:
         if self._footer is None or self.active_session_path is None:
@@ -271,16 +287,18 @@ class AgentlensApp(App[int]):
         if last > 0 and (now - last) > 30:
             idle_suffix = "  — session idle"
         path = self._short_session_path()
-        self._footer.update(
+        base = (
             f"session: {path} [{self.locator_reason}]{idle_suffix}"
             f"{self._flowchart_counts_suffix()}"
         )
+        self._footer.update(f"{base}{self._activity_suffix(base)}")
 
     # --- message routing -------------------------------------------------
 
     def on_harness_event_message(self, message: HarnessEventMessage) -> None:
         """Root handler fans event out to both panels."""
         self.last_event_monotonic = time.monotonic()
+        self._activity.record()
         if self._timeline is not None:
             self._timeline.add_event(message.event)
         if self._flowchart is not None:
@@ -493,6 +511,7 @@ class AgentlensApp(App[int]):
             if self._flowchart is not None:
                 self._flowchart.clear()
             self.last_event_monotonic = 0.0
+            self._activity = ActivityRate()
             self.selected_agent_id = None
             self._active_turn = None
             self._start_session_workers(chosen)
@@ -525,6 +544,7 @@ class AgentlensApp(App[int]):
             if self._flowchart is not None:
                 self._flowchart.clear()
             self.last_event_monotonic = 0.0
+            self._activity = ActivityRate()
             self.selected_agent_id = None
             self._active_turn = None
             self._start_session_workers(chosen)

@@ -8,6 +8,24 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [0.9.0] - 2026-04-14
+
+Activity Sparkline in status footer. The footer now shows a rolling 8-bar
+histogram of events/sec over the last 60 seconds using Unicode block
+characters (▁▂▃▄▅▆▇█) plus a `peak: N/s` label. The sparkline is suppressed
+automatically on narrow terminals and resets when switching sessions. 269
+tests passing.
+
+### Added
+
+- **Activity Sparkline** in the status footer: a rolling 8-bar histogram of
+  events/sec over the last 60 seconds, displayed using Unicode block
+  characters (▁▂▃▄▅▆▇█). Includes a `peak: N/s` label showing the peak event
+  rate (capped at `99+/s`). Auto-suppressed on narrow terminals to preserve
+  layout. Resets when switching sessions.
+
+---
+
 ## [Unreleased]
 
 ---
