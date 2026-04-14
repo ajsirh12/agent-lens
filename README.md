@@ -70,8 +70,10 @@ nested subagent trees and parallel-instance views.
   Windows / git-bash where the path format differs).
 - **Windows / git-bash compatibility**: the locator falls back to
   matching each JSONL's recorded `cwd` field when the slug
-  directory lookup misses, so sessions still resolve on platforms
-  whose slug convention this tool doesn't natively know.
+  directory lookup misses (backslash paths, MSYS2 `/c/…` paths,
+  case differences — all normalised automatically). Sessions still
+  resolve on Windows even when the slug-based picker fails. See the
+  [Windows notes](#windows--git-bash) section below.
 - **Subagent watcher** automatically discovers and tails new
   `agent-*.jsonl` files as they're created under the session's
   `subagents/` directory. Team agents spawned via
@@ -93,11 +95,34 @@ nested subagent trees and parallel-instance views.
 
 Requires Python 3.11+.
 
+**macOS / Linux**
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+```
+
+**Windows (git-bash / MSYS2)**
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+pip install -e '.[dev]'
+```
+
+> **Unicode rendering**: the UI uses block characters (▁▂▃▄▅▆▇█) and
+> box-drawing glyphs. Use **Windows Terminal** or a font such as
+> Cascadia Code / Fira Code for correct display. The legacy `conhost.exe`
+> console may render these as boxes or question marks.
 
 ## Run
 
@@ -110,16 +135,50 @@ agentlens --self-test                # render one frame, exit 0 (CI smoke)
 agentlens -v                         # verbose logging
 ```
 
-If `watchfiles` can't be installed, set `AGENTLENS_BACKEND=polling`
-to force the stdlib polling tailer:
+If `watchfiles` can't be installed (common on Windows where the C
+extension may fail to build), fall back to the stdlib polling tailer:
 
 ```bash
+# macOS / Linux / git-bash
 AGENTLENS_BACKEND=polling agentlens
+
+# Windows PowerShell
+$env:AGENTLENS_BACKEND="polling"; agentlens
+
+# Windows CMD
+set AGENTLENS_BACKEND=polling && agentlens
 ```
 
 See [`docs/USAGE.md`](docs/USAGE.md) for the full usage guide,
 including key bindings, mode semantics, drill-down flow, and
 architecture notes.
+
+## Windows / git-bash
+
+The slug directory that Claude Code creates for a project is derived
+from the working directory path. On Windows the path format differs
+(`C:\Users\…` or git-bash's `/c/Users/…`), which can cause the default
+slug lookup to miss.
+
+**Automatic fallback** — `SessionLocator` detects the miss and rescans
+`~/.claude/projects/` by comparing the `cwd` field recorded in each
+JSONL against the current directory (normalising backslashes, MSYS
+drive prefixes, and case). The footer shows `[cwd-match]` when the
+fallback fired.
+
+**Manual escape hatch** (`Shift+S`) — if the automatic fallback still
+doesn't find the right session, press `Shift+S` to open a path-input
+modal and paste either:
+
+- a full path to the `.jsonl` file, or
+- the first 8+ characters of the session UUID (e.g. `b0709256`).
+
+The UUID approach bypasses slug resolution entirely and works
+regardless of path format.
+
+**`--project-root`** — if you always run agentlens from a different
+directory than the Claude Code project, pass `--project-root PATH` to
+tell agentlens which directory to compute the slug from.
 
 ## Tests
 

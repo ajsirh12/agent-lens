@@ -38,7 +38,7 @@ Claude Code 세션을 실시간으로 모니터링하는 TUI 도구입니다. �
 - **스크롤 가능한 플로우차트**: 마우스 휠 + 키보드 (PgUp/PgDn, Shift+H/L, Home/End).
 - **세션 피커**: 같은 slug 디렉터리에 여러 JSONL이 있을 때 실행 시 표시됩니다. `--latest`로 우회 가능. 실행 중 `s`를 눌러 재시작 없이 같은 디렉터리의 다른 세션으로 전환 — 타임라인과 플로우차트가 새 세션에 맞게 자동으로 재구성됩니다.
 - **`Shift+S`를 통한 경로 직접 입력**: 전체 JSONL 경로 또는 세션 ID / 접두어(`b0709256`)를 받는 입력 모달을 엽니다. ID를 모든 프로젝트 하위 디렉터리에서 glob으로 찾아 매치하므로, slug 기반 피커가 실패할 때도(예: Windows/git-bash에서 경로 형식이 다를 때) 올바른 세션을 복구할 수 있습니다.
-- **Windows / git-bash 호환성**: slug 디렉터리 조회가 실패하면 로케이터가 각 JSONL의 `cwd` 필드를 기반으로 매칭하는 폴백을 사용하므로, 이 도구가 기본적으로 지원하지 않는 플랫폼에서도 세션이 정상적으로 해결됩니다.
+- **Windows / git-bash 호환성**: slug 디렉터리 조회가 실패하면 로케이터가 각 JSONL의 `cwd` 필드를 기반으로 매칭하는 폴백을 사용합니다(백슬래시 경로, MSYS2 `/c/…` 경로, 대소문자 차이 모두 자동 정규화). 아래 [Windows 사용 안내](#windows--git-bash)를 참조하세요.
 - **서브에이전트 왓처**: 세션의 `subagents/` 디렉터리 아래에 새 `agent-*.jsonl` 파일이 생성될 때 자동으로 발견하고 테일링합니다. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`로 스폰된 팀 에이전트는 `.meta.json` 사이드카에서 OMC 이름(예: `verifier-a`, `executor`)으로 해석됩니다.
 - **Turn Summary — 토큰 사용량 분해** (v0.8.1): Turn Summary 모달(`m` 키)에서 스킬 및 에이전트별 토큰 소비량을 계층 구조로 표시합니다. 스킬 스팬은 하위 에이전트를 4칸 들여쓰기로 나열하며, 독립 에이전트는 `agents (N)` 섹션 아래에 표시됩니다. `Total`은 이중 집계를 방지하기 위해 리프 합산값만 사용합니다.
 - **활동량 스파크라인** (Activity Sparkline) in the status footer: 마지막 60초 동안의 이벤트/초를 8단 블록 문자(▁▂▃▄▅▆▇█)로 표시하는 롤링 히스토그램이며, `peak: N/s` 레이블을 포함합니다. 화면이 좁을 때는 자동으로 숨겨집니다.
@@ -48,11 +48,33 @@ Claude Code 세션을 실시간으로 모니터링하는 TUI 도구입니다. �
 
 Python 3.11+ 필요.
 
+**macOS / Linux**
+
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
 ```
+
+**Windows (PowerShell)**
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[dev]"
+```
+
+**Windows (git-bash / MSYS2)**
+
+```bash
+python -m venv .venv
+source .venv/Scripts/activate
+pip install -e '.[dev]'
+```
+
+> **유니코드 렌더링**: UI는 블록 문자(▁▂▃▄▅▆▇█)와 박스 드로잉 글리프를 사용합니다.
+> **Windows Terminal** 또는 Cascadia Code / Fira Code 같은 폰트를 사용하세요.
+> 레거시 `conhost.exe` 콘솔에서는 깨진 문자로 표시될 수 있습니다.
 
 ## 실행
 
@@ -65,13 +87,33 @@ agentlens --self-test                # 한 프레임 렌더링 후 종료 코드
 agentlens -v                         # 상세 로깅
 ```
 
-`watchfiles`를 설치할 수 없는 경우, `AGENTLENS_BACKEND=polling`을 설정하여 표준 라이브러리 폴링 테일러를 강제 사용합니다:
+`watchfiles`를 설치할 수 없는 경우(Windows에서 C 확장 빌드 실패 시 흔히 발생), 표준 라이브러리 폴링 테일러를 강제 사용합니다:
 
 ```bash
+# macOS / Linux / git-bash
 AGENTLENS_BACKEND=polling agentlens
+
+# Windows PowerShell
+$env:AGENTLENS_BACKEND="polling"; agentlens
+
+# Windows CMD
+set AGENTLENS_BACKEND=polling && agentlens
 ```
 
 키 바인딩, 모드 의미론, 드릴다운 흐름, 아키텍처 노트를 포함한 전체 사용 가이드는 [`docs/USAGE.md`](USAGE.md)를 참조하세요.
+
+## Windows / git-bash
+
+Claude Code가 프로젝트에 생성하는 slug 디렉터리는 작업 디렉터리 경로에서 파생됩니다. Windows에서는 경로 형식이 달라(`C:\Users\…` 또는 git-bash의 `/c/Users/…`) 기본 slug 조회가 실패할 수 있습니다.
+
+**자동 폴백** — `SessionLocator`가 실패를 감지하고 `~/.claude/projects/` 전체를 스캔하여 각 JSONL에 기록된 `cwd` 필드를 현재 디렉터리와 비교합니다(백슬래시, MSYS 드라이브 접두사, 대소문자 정규화 자동 처리). 폴백이 동작하면 푸터에 `[cwd-match]`가 표시됩니다.
+
+**수동 우회 방법** (`Shift+S`) — 자동 폴백으로도 세션을 찾지 못할 경우 `Shift+S`로 경로 입력 모달을 열고 다음 중 하나를 붙여넣으세요:
+
+- `.jsonl` 파일의 전체 경로
+- 세션 UUID 앞 8자 이상 (예: `b0709256`) — slug 해석을 완전히 우회하므로 경로 형식과 무관하게 동작
+
+**`--project-root`** — agentlens를 Claude Code 프로젝트와 다른 디렉터리에서 실행하는 경우 `--project-root PATH`로 slug 계산 기준 디렉터리를 지정할 수 있습니다.
 
 ## 테스트
 
