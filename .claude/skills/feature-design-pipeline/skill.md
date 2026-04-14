@@ -79,6 +79,29 @@ TaskCreate:
 
 **격리 원칙**: 3인은 서로의 산출물을 볼 수 없다. 상충·보완은 design-synthesizer가 파일을 읽어 종합할 때 처리한다.
 
+### Phase 1.5: Feasibility 게이트 (오케스트레이터)
+
+3인 산출물의 `feasibility` 필드를 확인한다. synthesizer 실행 전에 반드시 이 체크를 수행한다.
+
+```
+각 파일 최상단의 feasibility 값 확인:
+  design_01_requirements.md → feasibility: ?
+  design_02_impact.md       → feasibility: ?
+  design_03_ux_spec.md      → feasibility: ?
+
+1개라도 "impossible":
+  - _workspace/{slug}/feasibility_block.md 작성
+    - 불가 판정 에이전트 목록
+    - 각 불가 사유
+    - 제안된 대안 종합
+  - 사용자에게 불가 사유와 대안을 직접 제시
+  - 파이프라인 종료 (synthesizer 실행 안 함)
+
+전부 "possible" 또는 "uncertain":
+  - Phase 2(synthesizer)로 진행
+  - "uncertain" 항목은 synthesizer에게 "결정 필요" 태그로 전달
+```
+
 ### Phase 2: 팬인 — 종합
 
 3인 완료 후 design-synthesizer가 종합한다.

@@ -45,6 +45,9 @@ TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계�
 
 **출력:**
 - `_workspace/{slug}/design_03_ux_spec.md`:
+  - **feasibility**: `possible` | `impossible` | `uncertain` (파일 최상단 필수)
+    - `impossible`: UX 관점 불가 사유 (터미널 제약, Textual 미지원 등) + 대안 명시
+    - `uncertain`: 불확실 사유 명시
   - 사용자 흐름 (step-by-step)
   - 키바인딩 제안 (기존 충돌 여부 포함)
   - ASCII 와이어프레임 (before/after)

@@ -38,6 +38,9 @@ description: "자연어 기능 요청에서 구조화된 요구사항을 추출�
 
 **출력:**
 - `_workspace/{slug}/design_01_requirements.md`:
+  - **feasibility**: `possible` | `impossible` | `uncertain` (파일 최상단 필수)
+    - `impossible`: 불가 사유 + 대안 2~3개 명시
+    - `uncertain`: 불확실 사유 명시
   - 기능 요약 (1~2문장)
   - 구조화된 요구사항 목록 (필수/선택 구분)
   - 수용 기준(AC) 체크리스트
@@ -47,9 +50,9 @@ description: "자연어 기능 요청에서 구조화된 요구사항을 추출�
 
 ## 에러 핸들링
 
-- 요청이 너무 모호하여 요구사항 도출 불가 → 모호성 목록에 "해소 필수" 태그 + 리더에 에스컬레이션
-- 기존 기능과 완전히 중복 → "기존 기능 참조" 리포트 + 리더에 판단 요청
-- 기술적으로 불가능한 요청 → 불가 사유와 대안을 제시
+- 요청이 너무 모호하여 요구사항 도출 불가 → feasibility: uncertain + 모호성 목록에 "해소 필수" 태그
+- 기존 기능과 완전히 중복 → feasibility: uncertain + "기존 기능 참조" 리포트
+- 기술적으로 불가능한 요청 → feasibility: impossible + 불가 사유와 대안 제시
 
 ## 팀 통신 프로토콜
 

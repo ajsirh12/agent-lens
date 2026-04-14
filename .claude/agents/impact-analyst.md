@@ -49,6 +49,9 @@ agentlens 전체 모듈의 의존 관계를 파악한다:
 
 **출력:**
 - `_workspace/{slug}/design_02_impact.md`:
+  - **feasibility**: `possible` | `impossible` | `uncertain` (파일 최상단 필수)
+    - `impossible`: 불가 사유 (불변식 위반 불가피, 아키텍처 제약 등) + 대안 명시
+    - `uncertain`: 불확실 사유 명시
   - 변경 대상 파일/함수 목록 (파일별 변경 유형: 수정/추가/삭제)
   - 인터페이스 변경 사항 (시그니처 before/after)
   - 의존성 전파 체인 (A→B→C 형태)
@@ -58,9 +61,10 @@ agentlens 전체 모듈의 의존 관계를 파악한다:
 
 ## 에러 핸들링
 
-- 분석 대상 파일 미존재 → 리포트에 명시, 리더에 에스컬레이션
+- 분석 대상 파일 미존재 → feasibility: uncertain + 리더에 에스컬레이션
 - 순환 의존성 발견 → 위험도 "높음" + 별도 섹션에 기술
-- 영향 범위 불확실 → "불확실" 태그 + 보수적 범위(넓게) 설정
+- 불변식 위반 불가피 → feasibility: impossible + 사유 명시
+- 영향 범위 불확실 → feasibility: uncertain + 보수적 범위(넓게) 설정
 
 ## 팀 통신 프로토콜
 
