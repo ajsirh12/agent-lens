@@ -236,7 +236,7 @@ Turn marker (Timeline 상의 `▶` user_message row) 에 Enter 를 누르면 **T
 
 **섹션 표시 순서:**
 1. Agents/Skills (기존)
-2. **Token Usage** (v0.9.0+) — LLM 토큰 소비 분해 (새로움)
+2. **Token Usage** (v0.8.1+) — LLM 토큰 소비 분해 (새로움)
    - `Total` — 이 turn 의 전체 토큰 합계 (bold)
    - `main` — 메인 세션 어시스턴트만 (subagent 제외)
    - **Skill Hierarchy** — skill span 내 spawned 에이전트의 토큰 (있을 때)
