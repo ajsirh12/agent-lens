@@ -278,6 +278,15 @@ class CallGraph:
     # boundaries — only on session switch (clear_turns currently keeps
     # this map; full session reset is external).
     _agent_to_skill: dict[str, str] = field(default_factory=dict)
+    # OMC team agent linking maps (FR-OMC).
+    # _pending_hex_to_type: hex agentId → OMC agentType, populated when
+    #   SubagentWatcherManager discovers a file with a companion .meta.json.
+    # _name_to_node: sanitized OMC agentType → node_id, populated when an
+    #   Agent tool_use carries an `input.name` field (OMC team spawn).
+    # Together they enable lazy resolution in _handle_assistant_usage when
+    # a subagent uuid is not yet in _subagent_uuid_to_node.
+    _pending_hex_to_type: dict[str, str] = field(default_factory=dict)
+    _name_to_node: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self._turns: list[TurnRecord] = []
@@ -338,6 +347,8 @@ class CallGraph:
             return self._handle_tool_use(ev)
         if ev.type == EventType.tool_result:
             return self._handle_tool_result(ev)
+        if ev.type == EventType.subagent_meta_link:
+            return self._handle_subagent_meta_link(ev)
         if ev.type == EventType.task_notification:
             return self._handle_task_notification(ev)
         if ev.type == EventType.hook_summary:
@@ -426,7 +437,11 @@ class CallGraph:
         if not isinstance(inp, dict):
             return False
         if tool in ("Agent", "Task"):
-            raw_name = inp.get("subagent_type") or "general-purpose"
+            # OMC team agents carry an `input.name` field (e.g. "token-worker-a")
+            # that is more specific than `subagent_type` ("general-purpose").
+            # Prefer name > subagent_type > "general-purpose" so each OMC
+            # team member gets its own flowchart node.
+            raw_name = inp.get("name") or inp.get("subagent_type") or "general-purpose"
             child_name = _sanitize_label(str(raw_name))
             if not child_name:
                 return False
@@ -475,6 +490,18 @@ class CallGraph:
                 last_ts=ts_epoch,
             )
             changed = True
+
+        # Register OMC agent name → node_id for deferred subagent linking.
+        # OMC team tool_results embed "agent_id: name@team" (not agentId: hex),
+        # so the standard linked_subagent_uuid path never fires. We store the
+        # name here so _handle_subagent_meta_link can resolve it later.
+        if ntype == "agent":
+            try:
+                omc_name = inp.get("name")
+                if omc_name and isinstance(omc_name, str):
+                    self._name_to_node[_sanitize_label(omc_name)] = child_id
+            except Exception:
+                pass  # never-raise
 
         # Mark this node as belonging to the current user turn. It will
         # be kept visually "running" until the next user_message clears
@@ -662,6 +689,54 @@ class CallGraph:
                     inst.status = "error"
         return True
 
+    def _handle_subagent_meta_link(self, ev: HarnessEvent) -> bool:
+        """Handle a subagent_meta_link event emitted by SubagentWatcherManager.
+
+        Stores hex_id → agent_type in _pending_hex_to_type and eagerly
+        resolves into _subagent_uuid_to_node when _name_to_node already has
+        a matching entry. This handles OMC team agents whose tool_results
+        carry "agent_id: name@team" instead of "agentId: <hex-hash>".
+        """
+        try:
+            payload = ev.payload if isinstance(ev.payload, dict) else {}
+            hex_id = payload.get("hex_id")
+            agent_type = payload.get("agent_type")
+            if not hex_id or not agent_type:
+                return False
+            hex_id = str(hex_id)
+            agent_type = _sanitize_label(str(agent_type))
+            if not agent_type:
+                return False
+            self._pending_hex_to_type[hex_id] = agent_type
+            # Eagerly resolve if _name_to_node already has the entry.
+            node_id = self._name_to_node.get(agent_type)
+            if node_id and hex_id not in self._subagent_uuid_to_node:
+                self._subagent_uuid_to_node[hex_id] = node_id
+                return True
+        except Exception:
+            pass  # never-raise
+        return False
+
+    def _lazy_resolve_subagent_uuid(self, hex_id: str) -> str | None:
+        """Deferred name-based link for OMC team agents.
+
+        Called when a subagent_uuid is not yet in _subagent_uuid_to_node.
+        Returns the node_id if both _pending_hex_to_type and _name_to_node
+        have matching entries; caches the result in _subagent_uuid_to_node.
+        Returns None if the link cannot be resolved yet.
+        """
+        try:
+            agent_type = self._pending_hex_to_type.get(hex_id)
+            if not agent_type:
+                return None
+            node_id = self._name_to_node.get(agent_type)
+            if node_id:
+                self._subagent_uuid_to_node[hex_id] = node_id  # cache
+                return node_id
+        except Exception:
+            pass  # never-raise
+        return None
+
     def _handle_subagent_tool_use(self, ev: HarnessEvent) -> bool:
         """Route an internal tool_use event from a subagent file.
 
@@ -682,7 +757,10 @@ class CallGraph:
         sub_uuid = ev.payload.get("subagent_uuid")
         if not sub_uuid:
             return False
-        node_id = self._subagent_uuid_to_node.get(str(sub_uuid))
+        sub_uuid_str = str(sub_uuid)
+        node_id = self._subagent_uuid_to_node.get(sub_uuid_str)
+        if not node_id:
+            node_id = self._lazy_resolve_subagent_uuid(sub_uuid_str)
         if not node_id:
             return False
         node = self.nodes.get(node_id)
@@ -733,7 +811,10 @@ class CallGraph:
         sub_uuid = ev.payload.get("subagent_uuid")
         if not sub_uuid:
             return False
-        parent_id = self._subagent_uuid_to_node.get(str(sub_uuid))
+        sub_uuid_str = str(sub_uuid)
+        parent_id = self._subagent_uuid_to_node.get(sub_uuid_str)
+        if not parent_id:
+            parent_id = self._lazy_resolve_subagent_uuid(sub_uuid_str)
         if not parent_id:
             return False
         if parent_id not in self.nodes:
@@ -1502,7 +1583,10 @@ class CallGraph:
 
         subagent_uuid = payload.get("subagent_uuid")
         if subagent_uuid:
-            node_id = self._subagent_uuid_to_node.get(str(subagent_uuid))
+            sub_uuid_str = str(subagent_uuid)
+            node_id = self._subagent_uuid_to_node.get(sub_uuid_str)
+            if not node_id:
+                node_id = self._lazy_resolve_subagent_uuid(sub_uuid_str)
             if not node_id:
                 return False  # subagent not yet linked — drop
             node = self.nodes.get(node_id)

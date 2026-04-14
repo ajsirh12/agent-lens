@@ -25,6 +25,11 @@ class EventType(str, Enum):
     task_notification = "task_notification"
     permission_mode = "permission_mode"
     hook_summary = "hook_summary"
+    # Emitted by SubagentWatcherManager when a new agent file is discovered
+    # alongside a .meta.json — maps the hex agentId to the OMC agentType so
+    # the graph model can link OMC team agents that never embed agentId in
+    # their tool_result content.
+    subagent_meta_link = "subagent_meta_link"
     unknown = "unknown"
 
 

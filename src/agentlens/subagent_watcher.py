@@ -15,10 +15,13 @@ main flowchart without creating new graph nodes.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .events import EventType, HarnessEvent
 from .subagent_locator import SubagentLocator
 from .watcher import PollingTailer
 
@@ -80,10 +83,44 @@ class SubagentWatcherManager:
         for path in self._locator.list_files():
             if path in self._tasks:
                 continue
+            # Emit a subagent_meta_link event before spawning the tailer so
+            # the graph model can resolve OMC team agent names to node IDs
+            # before the tailer starts streaming assistant_message events.
+            self._emit_meta_link(path, app)
             tailer = PollingTailer(path, interval=self.tail_interval)
             coro = self._run_tailer(tailer, app, stop_event)
             task = asyncio.create_task(coro, name=f"subagent-tail:{path.name}")
             self._tasks[path] = task
+
+    def _emit_meta_link(self, path: Path, app: "AgentlensApp | None") -> None:
+        """Read companion .meta.json and post a subagent_meta_link event.
+
+        Silently skips if meta.json is absent, unreadable, or lacks agentType.
+        Never raises.
+        """
+        if app is None:
+            return
+        try:
+            hex_id = SubagentLocator.agent_id_from_filename(path)
+            if not hex_id:
+                return
+            meta_path = path.parent / (path.stem + ".meta.json")
+            if not meta_path.is_file():
+                return
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            agent_type = meta.get("agentType") or meta.get("agent_type") or ""
+            if not agent_type:
+                return
+            ev = HarnessEvent(
+                type=EventType.subagent_meta_link,
+                ts=datetime.now(timezone.utc),
+                agent_id=None,
+                payload={"hex_id": hex_id, "agent_type": str(agent_type)},
+            )
+            from .messages import HarnessEventMessage
+            app.post_message(HarnessEventMessage(ev))
+        except Exception:
+            pass  # never-raise
 
     async def _run_tailer(
         self,
