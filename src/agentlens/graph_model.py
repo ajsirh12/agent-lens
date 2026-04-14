@@ -130,6 +130,7 @@ _SYSTEM_USER_PREFIXES = (
     "Caveat:",                 # internal caveats
     "<command-name>",          # slash command bookkeeping (without command-message)
     "<local-command-stdout>",  # bare local command output
+    "<teammate-message",       # teammate callback responses (team pipeline)
 )
 
 
