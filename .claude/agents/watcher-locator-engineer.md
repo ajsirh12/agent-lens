@@ -51,17 +51,16 @@ description: "파일 와처, 세션 로케이터, 서브에이전트 JSONL 자�
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `fixture-replay-qa` | SendMessage | 수정 완료 시 recheck 요청 |
+| 리더 | SendMessage | 에스컬레이션 (해결 불가 상황) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `jsonl-schema-analyst` | SendMessage | JSONL 파일 구조/경로 패턴 변경 시 |
-| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/{slug}/qa_iter_{n}.md` 참조 |
-| 리더 | TaskCreate | 구현 작업 할당 |
+| 리더 | TaskCreate | 구현 작업 할당 (초기 및 QA 실패 후 재작업 시 실패 컨텍스트 포함) |
 
-### 파일
-- 작성: `_workspace/{slug}/02_watcher_changes.md`
+### 파일 계약
+- 읽기: `_workspace/{slug}/design_spec.md` (있으면), `_workspace/{slug}/01_schema_report.md` (있으면), `_workspace/{slug}/qa_iter_{n}.md` (재작업 시)
+- 쓰기: `_workspace/{slug}/02_watcher_changes.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

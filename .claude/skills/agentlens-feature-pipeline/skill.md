@@ -48,7 +48,7 @@ TeamCreate:
 `01_schema_report.md`를 `tests/fixtures/` 실제 데이터와 교차 비교.
 
 - **1회 리뷰, 루프 없음**
-- 불일치 발견 → analyst에 SendMessage (수정 요청 1회)
+- 불일치 발견 → `01_5_schema_review.md`에 상세 기록 → 리더가 판단 후 analyst 재조사 여부 결정
 - 불일치 3개+ → 리더에 analyst 승격 요청 (haiku → sonnet)
 - 출력: `_workspace/{slug}/01_5_schema_review.md`
 - Phase 1 실행 시에만 동작
@@ -74,30 +74,29 @@ TeamCreate:
 2. pytest 전체 green
 3. ruff check clean
 
-**실패 시 재시도:**
+**실패 시 재시도 (리더가 파일 읽고 라우팅):**
 
 ```
 iter 1:
-  - qa_iter_1.md 기록
-  - 해당 구현 에이전트에 SendMessage (기본 모델 유지)
+  - QA 에이전트: qa_iter_1.md 작성 (실패 경계면, 기대값, 실제값, 의심 원인, 수정 필요 파일)
+  - 리더: qa_iter_1.md 읽기 → 해당 구현 에이전트에 TaskCreate (기본 모델 유지, 실패 컨텍스트 포함)
 
 iter 2:
-  - qa_iter_2.md (iter 1 요약 포함)
-  - 실패한 구현 에이전트를 opus로 승격
+  - QA 에이전트: qa_iter_2.md 작성 (iter 1 요약 포함)
+  - 리더: qa_iter_2.md 읽기 → 실패한 구현 에이전트를 opus로 승격
   - 리더가 TaskUpdate(metadata: {model: "opus"}) 기록
-  - 승격된 모델로 재시도
+  - 리더: 해당 에이전트에 TaskCreate (opus 모델로)
 
 iter 3:
-  - qa_iter_3.md (iter 1+2 요약 포함)
-  - opus 강제
-  - 마지막 시도
+  - QA 에이전트: qa_iter_3.md 작성 (iter 1+2 요약 포함)
+  - 리더: opus 강제, 마지막 TaskCreate
 
 iter > 3:
-  - _workspace/{slug}/escalation.md 작성
+  - QA 에이전트: _workspace/{slug}/escalation.md 작성
     - 3회 전체 실패 diff 요약
     - 수정 시도 내역
     - 의심 가설
-  - 사람 개입 요청
+  - 리더: 사람 개입 요청
 ```
 
 **금지:**

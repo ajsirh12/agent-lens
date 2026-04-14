@@ -42,7 +42,6 @@ TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계�
 
 **입력:**
 - 리더로부터 TaskCreate: 사용자의 기능 요청 원문
-- 선택적: requirements-analyst로부터 UX 관련 요구사항 강조
 
 **출력:**
 - `_workspace/{slug}/design_03_ux_spec.md`:
@@ -63,18 +62,16 @@ TUI 관점에서 사용자 흐름, 키바인딩, 화면 레이아웃을 설계�
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `requirements-analyst` | SendMessage | UX 관점에서 요구사항 충돌/모호성 발견 시 |
-| `impact-analyst` | SendMessage | 특정 패널 변경이 필요할 때 영향도 확인 요청 |
+| 리더 | SendMessage | 에스컬레이션 (키바인딩 충돌 판단 필요·공간 부족 결정 필요) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `requirements-analyst` | SendMessage | UX 관련 요구사항 강조 |
-| `impact-analyst` | SendMessage | 패널/위젯 영향 분석 결과 |
 | 리더 | TaskCreate | 분석 시작 지시 |
 
-### 파일
-- 작성: `_workspace/{slug}/design_03_ux_spec.md`
+### 파일 계약
+- 읽기: `src/agentlens/app.py`, `src/agentlens/app.tcss`, `src/agentlens/panels/*` (키바인딩·레이아웃 참조)
+- 쓰기: `_workspace/{slug}/design_03_ux_spec.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

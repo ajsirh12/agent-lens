@@ -58,8 +58,6 @@ description: "design_spec.md의 완성도, 일관성, 간과된 리스크를 기
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `design-synthesizer` | SendMessage | REJECT 시 수정 요청 |
-| `requirements-analyst` / `impact-analyst` / `ux-spec-writer` | SendMessage | 특정 산출물의 재작업 요청 |
 | 리더 | SendMessage | iter 2 초과 시 에스컬레이션 |
 
 ### 수신
@@ -67,9 +65,11 @@ description: "design_spec.md의 완성도, 일관성, 간과된 리스크를 기
 |--------|------|------|
 | 리더 | TaskCreate | 리뷰 시작 지시 |
 
-### 파일
-- 읽기: `_workspace/{slug}/design_*.md`
-- 작성: `_workspace/{slug}/design_review.md`
+### 파일 계약
+- 읽기: `_workspace/{slug}/design_01_requirements.md`, `_workspace/{slug}/design_02_impact.md`, `_workspace/{slug}/design_03_ux_spec.md`, `_workspace/{slug}/design_spec.md`
+- 쓰기: `_workspace/{slug}/design_review.md`
+
+**REJECT 처리**: 수정 요청 대상과 재작업 범위를 `design_review.md`에 상세 기록한다. 직접 에이전트에 연락하지 않는다 — 리더가 파일을 읽고 라우팅한다.
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

@@ -62,15 +62,16 @@ Textual async 테스트 작성·실행 및 pytest/ruff 검증을 담당하는 �
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| (qa_iter_{n}.md에 합류 기록) | 파일 | 실패 시 fixture-replay-qa와 같은 리포트 파일에 추가 |
+| 리더 | SendMessage | 에스컬레이션 (환경 문제·hang 등) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| 리더 | TaskCreate | Phase 3 검증 시작 지시 |
+| 리더 | TaskCreate | Phase 3 검증 시작 지시 (재검증 시 "iter N" 컨텍스트 포함) |
 
-### 파일
-- 작성: `_workspace/{slug}/qa_iter_{n}.md`에 pytest/ruff 결과 추가 (fixture-replay-qa와 공유)
+### 파일 계약
+- 읽기: 구현된 소스 파일, `tests/test_*.py`
+- 쓰기: `_workspace/{slug}/qa_iter_{n}.md` (fixture-replay-qa와 같은 파일에 결과 추가)
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

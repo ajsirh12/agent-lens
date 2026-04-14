@@ -35,7 +35,6 @@ description: "자연어 기능 요청에서 구조화된 요구사항을 추출�
 
 **입력:**
 - 리더로부터 TaskCreate: 사용자의 자연어 기능 요청 원문
-- 선택적: 이전 대화 컨텍스트
 
 **출력:**
 - `_workspace/{slug}/design_01_requirements.md`:
@@ -57,18 +56,16 @@ description: "자연어 기능 요청에서 구조화된 요구사항을 추출�
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `impact-analyst` | SendMessage | 요구사항에서 특정 모듈 영향이 예상될 때 힌트 전달 |
-| `ux-spec-writer` | SendMessage | UX에 영향주는 요구사항 강조 |
+| 리더 | SendMessage | 에스컬레이션 (요청 모호·기술 불가 등) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `impact-analyst` | SendMessage | 기술 제약으로 요구사항 조정 필요 시 |
-| `ux-spec-writer` | SendMessage | UX 관점에서 요구사항 충돌 발견 시 |
 | 리더 | TaskCreate | 분석 시작 지시 |
 
-### 파일
-- 작성: `_workspace/{slug}/design_01_requirements.md`
+### 파일 계약
+- 읽기: 코드베이스 (참조 전용)
+- 쓰기: `_workspace/{slug}/design_01_requirements.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

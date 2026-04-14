@@ -33,7 +33,7 @@ TeamCreate:
 
 ### Phase 1: 팬아웃 — 3인 병렬 분석
 
-3인에게 동시에 TaskCreate한다. 각자 독립적으로 분석하되 SendMessage로 힌트를 교환한다.
+3인에게 동시에 TaskCreate한다. 각자 **독립적으로** 분석하며 에이전트 간 직접 통신은 없다.
 
 ```
 TaskCreate:
@@ -43,6 +43,7 @@ TaskCreate:
       사용자 요청: "{원문}"
       _workspace/{slug}/design_01_requirements.md 생성.
       스킬 requirements-extraction 참조.
+      완료 후 파일만 남긴다. 다른 에이전트와 통신하지 않는다.
     deps: []
 
   - task: "영향 분석"
@@ -51,6 +52,7 @@ TaskCreate:
       사용자 요청: "{원문}"
       _workspace/{slug}/design_02_impact.md 생성.
       스킬 impact-analysis 참조.
+      완료 후 파일만 남긴다. 다른 에이전트와 통신하지 않는다.
     deps: []
 
   - task: "UX 설계"
@@ -59,15 +61,11 @@ TaskCreate:
       사용자 요청: "{원문}"
       _workspace/{slug}/design_03_ux_spec.md 생성.
       스킬 tui-ux-spec 참조.
+      완료 후 파일만 남긴다. 다른 에이전트와 통신하지 않는다.
     deps: []
 ```
 
-**팀원 간 통신 (자율):**
-- requirements-analyst → impact-analyst: 특정 모듈 영향 예상 힌트
-- requirements-analyst → ux-spec-writer: UX 관련 요구사항 강조
-- impact-analyst → ux-spec-writer: 패널/위젯 영향 분석 결과
-- impact-analyst → requirements-analyst: 기술 제약으로 요구사항 조정 필요 시
-- ux-spec-writer → requirements-analyst: UX 관점 요구사항 충돌 발견 시
+**격리 원칙**: 3인은 서로의 산출물을 볼 수 없다. 상충·보완은 design-synthesizer가 파일을 읽어 종합할 때 처리한다.
 
 ### Phase 2: 팬인 — 종합
 

@@ -59,7 +59,6 @@ description: "구현 파이프라인의 코드 변경이 design_spec.md를 따�
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| 해당 구현 에이전트 | SendMessage | REJECT 시 수정 요청 |
 | 리더 | SendMessage | iter 2 초과 시 에스컬레이션 |
 
 ### 수신
@@ -67,9 +66,11 @@ description: "구현 파이프라인의 코드 변경이 design_spec.md를 따�
 |--------|------|------|
 | 리더 | TaskCreate | QA 통과 후 리뷰 시작 지시 |
 
-### 파일
+### 파일 계약
 - 읽기: `_workspace/{slug}/design_spec.md`, `_workspace/{slug}/02_*_changes.md`, 변경된 소스 파일
-- 작성: `_workspace/{slug}/code_review.md`
+- 쓰기: `_workspace/{slug}/code_review.md`
+
+**REJECT 처리**: 수정 요청 에이전트·범위·파일:라인을 `code_review.md`에 상세 기록한다. 직접 구현 에이전트에 연락하지 않는다 — 리더가 파일을 읽고 TaskCreate로 라우팅한다.
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

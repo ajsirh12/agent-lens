@@ -46,7 +46,6 @@ agentlens 전체 모듈의 의존 관계를 파악한다:
 
 **입력:**
 - 리더로부터 TaskCreate: 사용자의 기능 요청 원문
-- 선택적: requirements-analyst로부터 힌트
 
 **출력:**
 - `_workspace/{slug}/design_02_impact.md`:
@@ -68,18 +67,16 @@ agentlens 전체 모듈의 의존 관계를 파악한다:
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `requirements-analyst` | SendMessage | 기술 제약으로 요구사항 조정 제안 시 |
-| `ux-spec-writer` | SendMessage | 특정 패널/위젯에 영향이 큰 변경 발견 시 |
-| `design-synthesizer` | SendMessage | 위험도 "높음" 항목 조기 공유 |
+| 리더 | SendMessage | 에스컬레이션 (파일 미존재·순환 의존성·복잡도 경고) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `requirements-analyst` | SendMessage | 특정 모듈 영향 예상 힌트 |
 | 리더 | TaskCreate | 분석 시작 지시 |
 
-### 파일
-- 작성: `_workspace/{slug}/design_02_impact.md`
+### 파일 계약
+- 읽기: 코드베이스 (참조 전용)
+- 쓰기: `_workspace/{slug}/design_02_impact.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

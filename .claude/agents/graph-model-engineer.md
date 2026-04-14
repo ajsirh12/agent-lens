@@ -57,18 +57,16 @@ description: "그래프 모델(노드/엣지), 중첩 서브에이전트 트리,
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `fixture-replay-qa` | SendMessage | 수정 완료 시 recheck 요청 |
-| `jsonl-schema-analyst` | SendMessage | 새 tool name 패턴 발견 시 재조사 요청 |
+| 리더 | SendMessage | 에스컬레이션 (불변식 위반 강제 요청·해결 불가 상황) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `jsonl-schema-analyst` | SendMessage | 새 tool name/subagent spawn 패턴 알림 |
-| `fixture-replay-qa` | SendMessage | QA 실패 리포트 + `_workspace/{slug}/qa_iter_{n}.md` 참조 |
-| 리더 | TaskCreate | 구현 작업 할당 |
+| 리더 | TaskCreate | 구현 작업 할당 (초기 및 QA 실패 후 재작업 시 실패 컨텍스트 포함) |
 
-### 파일
-- 작성: `_workspace/{slug}/02_graph_changes.md`
+### 파일 계약
+- 읽기: `_workspace/{slug}/design_spec.md` (있으면), `_workspace/{slug}/01_schema_report.md` (있으면), `_workspace/{slug}/qa_iter_{n}.md` (재작업 시)
+- 쓰기: `_workspace/{slug}/02_graph_changes.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

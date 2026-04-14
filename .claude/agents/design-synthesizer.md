@@ -34,10 +34,9 @@ description: "3인의 분석 산출물(요구사항, 영향 분석, UX 스펙)�
 ## 입력/출력 프로토콜
 
 **입력:**
-- `_workspace/{slug}/design_01_requirements.md` (requirements-analyst)
-- `_workspace/{slug}/design_02_impact.md` (impact-analyst)
-- `_workspace/{slug}/design_03_ux_spec.md` (ux-spec-writer)
-- 선택적: impact-analyst로부터 조기 공유된 위험 항목
+- `_workspace/{slug}/design_01_requirements.md`
+- `_workspace/{slug}/design_02_impact.md`
+- `_workspace/{slug}/design_03_ux_spec.md`
 
 **출력:**
 - `_workspace/{slug}/design_spec.md`:
@@ -61,17 +60,16 @@ description: "3인의 분석 산출물(요구사항, 영향 분석, UX 스펙)�
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| 리더 | SendMessage | 종합 완료 알림 + 결정 필요 항목 요약 |
+| 리더 | SendMessage | 에스컬레이션 (산출물 누락·구현 불가 판정) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `impact-analyst` | SendMessage | 위험도 "높음" 항목 조기 공유 |
-| 리더 | TaskCreate | 종합 시작 지시 |
+| 리더 | TaskCreate | 종합 시작 지시 (3인 산출물 파일 경로 포함) |
 
-### 파일
-- 읽기: `_workspace/{slug}/design_01_requirements.md`, `design_02_impact.md`, `design_03_ux_spec.md`
-- 작성: `_workspace/{slug}/design_spec.md`
+### 파일 계약
+- 읽기: `_workspace/{slug}/design_01_requirements.md`, `_workspace/{slug}/design_02_impact.md`, `_workspace/{slug}/design_03_ux_spec.md`
+- 쓰기: `_workspace/{slug}/design_spec.md`
 
 ### 태스크
 - 시작 시 `TaskUpdate(status="in_progress")`

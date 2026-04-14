@@ -52,18 +52,18 @@ Claude Code 세션 JSONL 스키마를 탐색하여 이벤트 타입, 필드 변�
 ### 발신
 | 수신자 | 채널 | 상황 |
 |--------|------|------|
-| `tui-panel-engineer` | SendMessage | 스키마 변경이 Timeline DataTable 컬럼에 영향줄 때 |
-| `graph-model-engineer` | SendMessage | 새 tool name 또는 subagent spawn 패턴 발견 시 |
-| `watcher-locator-engineer` | SendMessage | JSONL 파일 구조/경로 패턴 변경 발견 시 |
+| 리더 | SendMessage | 에스컬레이션 (JSONL 파일 없음 등) |
 
 ### 수신
 | 발신자 | 채널 | 상황 |
 |--------|------|------|
-| `fixture-replay-qa` | SendMessage | Phase 1.5 교차 검증 불일치 수정 요청 |
-| 리더 | TaskCreate | 조사 시작 지시 |
+| 리더 | TaskCreate | 조사 시작 지시 (재조사 요청 시 수정 범위 포함) |
 
-### 파일
-- 작성: `_workspace/{slug}/01_schema_report.md`
+### 파일 계약
+- 읽기: 조사 대상 JSONL 경로, `docs/jsonl-schema-observed.md`, `src/agentlens/parser.py`
+- 쓰기: `_workspace/{slug}/01_schema_report.md`
+
+**스키마 리포트 내 영향 범위**: 구현 에이전트별 영향을 리포트에 섹션으로 기술한다. 직접 에이전트에 연락하지 않는다 — 리더가 리포트를 읽고 구현 에이전트에게 전달한다.
 
 ### 태스크
 - 완료 시 `TaskUpdate(status="completed")`
