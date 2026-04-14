@@ -1,5 +1,7 @@
 # agentlens
 
+[한국어](docs/README.ko.md)
+
 Live-tail TUI for Claude Code sessions. Shows a Timeline of tool calls
 alongside a real-time Flowchart of agent and skill spawns, including
 nested subagent trees and parallel-instance views.
