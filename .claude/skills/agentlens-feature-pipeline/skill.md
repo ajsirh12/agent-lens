@@ -29,6 +29,7 @@ TeamCreate:
     - watcher-locator-engineer     (general-purpose, sonnet)
     - fixture-replay-qa            (general-purpose, sonnet)
     - textual-test-engineer        (general-purpose, sonnet)
+    - code-reviewer                (general-purpose, opus)
     - release-doc-writer           (general-purpose, haiku)
 ```
 
@@ -103,9 +104,32 @@ iter > 3:
 - QA 에이전트의 코드 수정 (작성자-검증자 분리)
 - fixture 파일 수정으로 테스트 통과시키기 (즉시 에스컬레이션)
 
+### Phase 3.5: 코드 리뷰 (code-reviewer, opus)
+
+QA 통과 후 code-reviewer가 체크리스트 기반으로 구현을 검증한다.
+
+- 입력: `design_spec.md` (있으면), `02_*_changes.md`, git diff
+- 출력: `_workspace/{slug}/code_review.md` (PASS / REJECT)
+- 사용 스킬: `code-review-checklist`
+- **작성자-검증자 분리**: 구현 에이전트와 다른 인스턴스
+
+**재시도 루프:**
+
+```
+iter 1 REJECT:
+  - review에 명시된 수정 요청을 해당 구현 에이전트에 SendMessage
+  - 해당 에이전트가 수정 → QA 재실행 → code-reviewer 재실행 (iter 2)
+
+iter 2 REJECT:
+  - 리더가 사용자에 에스컬레이션
+  - _workspace/{slug}/code_review.md에 전체 iter 기록
+```
+
+PASS 시에만 Phase 4(문서화)로 진행한다.
+
 ### Phase 4: 문서화 (release-doc-writer, haiku)
 
-QA 통과 후 실행. `_workspace/{slug}/02_*_changes.md` 참조하여 문서 4종 갱신.
+코드 리뷰 통과 후 실행. `_workspace/{slug}/02_*_changes.md` 참조하여 문서 4종 갱신.
 
 ## 작업 의존성 DAG
 
@@ -119,7 +143,9 @@ task_05_replay_qa             (fixture-qa)    → deps: [task_02, task_03, task_
 task_06_pytest_ruff           (textual-test)  → deps: [task_02, task_03, task_04]
 task_07_qa_gate               (leader)        → deps: [task_05, task_06]
                                                 ↺ 실패 시 task_02..04 재개
-task_08_docs                  (doc-writer)    → deps: [task_07 통과]
+task_08_code_review           (code-reviewer) → deps: [task_07 통과]
+                                                ↺ REJECT 시 task_02..04 재개
+task_09_docs                  (doc-writer)    → deps: [task_08 PASS]
 ```
 
 ## 모델 승격 프로토콜
@@ -146,6 +172,7 @@ task_08_docs                  (doc-writer)    → deps: [task_07 통과]
 ├── 02_graph_changes.md
 ├── 02_watcher_changes.md
 ├── qa_iter_{n}.md
+├── code_review.md
 ├── escalation.md
 └── 04_docs_diff.md
 ```

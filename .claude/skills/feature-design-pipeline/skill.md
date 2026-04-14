@@ -26,6 +26,7 @@ TeamCreate:
     - impact-analyst            (general-purpose, opus)
     - ux-spec-writer            (general-purpose, opus)
     - design-synthesizer        (general-purpose, opus)
+    - design-reviewer           (general-purpose, opus)
 ```
 
 ## Phase 흐름
@@ -84,13 +85,37 @@ TaskCreate:
     deps: [task_01, task_02, task_03]
 ```
 
+### Phase 2.5: 설계 리뷰 (design-reviewer)
+
+synthesizer 완료 후 design-reviewer가 체크리스트 기반으로 `design_spec.md`를 검증한다.
+
+- 입력: `design_01~03_*.md` + `design_spec.md`
+- 출력: `_workspace/{slug}/design_review.md` (PASS / REJECT)
+- 사용 스킬: `design-review-checklist`
+- **작성자-검증자 분리**: design-synthesizer와 다른 인스턴스로 실행
+
+**재시도 루프:**
+
+```
+iter 1 REJECT:
+  - review에 명시된 수정 요청을 해당 에이전트에 SendMessage
+  - 해당 에이전트(analyst/impact/ux/synthesizer)가 수정
+  - design-reviewer 재실행 (iter 2)
+
+iter 2 REJECT:
+  - 리더가 사용자에게 에스컬레이션
+  - _workspace/{slug}/design_review.md에 전체 iter 기록
+```
+
+PASS 시에만 Phase 3(사용자 승인)로 진행한다.
+
 ### Phase 3: 사용자 승인
 
-리더가 `design_spec.md`를 사용자에게 제시한다.
+리더가 리뷰 통과된 `design_spec.md`를 사용자에게 제시한다.
 
 - **"결정 필요" 항목**이 있으면 사용자에게 판단을 요청한다
 - 승인 시 → `agentlens-feature-pipeline`로 핸드오프 가능
-- 수정 요청 시 → 해당 에이전트에 TaskCreate로 재작업 지시
+- 수정 요청 시 → 해당 에이전트에 TaskCreate로 재작업 지시 → Phase 2.5부터 재실행
 
 ## 작업 의존성 DAG
 
@@ -99,7 +124,9 @@ task_01_requirements  (requirements-analyst)  → deps: []
 task_02_impact        (impact-analyst)         → deps: []
 task_03_ux_spec       (ux-spec-writer)         → deps: []
 task_04_synthesis     (design-synthesizer)     → deps: [01, 02, 03]
-task_05_user_review   (leader)                → deps: [04]
+task_05_review        (design-reviewer)        → deps: [04]
+                                                 ↺ REJECT 시 task_01~04 해당 에이전트 재개
+task_06_user_review   (leader)                 → deps: [05 PASS]
 ```
 
 ## 데이터 전달
@@ -116,7 +143,8 @@ task_05_user_review   (leader)                → deps: [04]
 ├── design_01_requirements.md   (requirements-analyst)
 ├── design_02_impact.md         (impact-analyst)
 ├── design_03_ux_spec.md        (ux-spec-writer)
-└── design_spec.md              (design-synthesizer, 최종)
+├── design_spec.md              (design-synthesizer)
+└── design_review.md            (design-reviewer, 최종 게이트)
 ```
 
 ## 기존 파이프라인과의 연결
