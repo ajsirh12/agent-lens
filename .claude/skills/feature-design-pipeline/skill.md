@@ -34,9 +34,9 @@ description: "자연어 기능 요청을 구조화된 설계 문서로 변환하
 TeamCreate:
   team_name: agentlens-design-team
   members:
-    - requirements-analyst      (general-purpose, opus)
-    - impact-analyst            (general-purpose, opus)
-    - ux-spec-writer            (general-purpose, opus)
+    - requirements-analyst      (general-purpose, sonnet)
+    - impact-analyst            (general-purpose, sonnet)
+    - ux-spec-writer            (general-purpose, sonnet)
     - design-synthesizer        (general-purpose, opus)
     - design-reviewer           (general-purpose, opus)
 ```
