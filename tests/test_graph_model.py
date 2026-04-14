@@ -651,3 +651,169 @@ def test_t_a7_get_turn_summary_contains_new_keys() -> None:
     # Empty turn → both are empty lists.
     assert s["token_skill_tree"] == []
     assert s["token_agents_standalone"] == []
+
+
+# ---------------------------------------------------------------------------
+# OMC team agent name-based linking (subagent_meta_link / _lazy_resolve)
+# ---------------------------------------------------------------------------
+
+
+def _omc_agent_use(
+    name: str,
+    *,
+    tid: str = "t1",
+    description: str = "",
+) -> HarnessEvent:
+    """Agent tool_use with OMC-style `name` field (no subagent_type)."""
+    return HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={
+            "tool_name": "Agent",
+            "tool_use_id": tid,
+            "input": {
+                "name": name,
+                "description": description or f"{name}: test task",
+                "prompt": "do work",
+                "team_name": "test-team",
+            },
+        },
+    )
+
+
+def _meta_link(hex_id: str, agent_type: str) -> HarnessEvent:
+    """subagent_meta_link event emitted by SubagentWatcherManager."""
+    return HarnessEvent(
+        type=EventType.subagent_meta_link,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"hex_id": hex_id, "agent_type": agent_type},
+    )
+
+
+def test_t_c1_omc_agent_uses_name_field_for_node_id() -> None:
+    """T-C1: Agent tool_use with input.name creates node agent:<name>, not agent:general-purpose."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_omc_agent_use("token-worker-a", tid="t1"))
+
+    assert "agent:token-worker-a" in g.nodes
+    assert "agent:general-purpose" not in g.nodes
+    assert g.nodes["agent:token-worker-a"].label == "token-worker-a"
+
+
+def test_t_c2_omc_agent_populates_name_to_node() -> None:
+    """T-C2: Agent tool_use with input.name populates _name_to_node."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_omc_agent_use("verifier-a", tid="t1"))
+
+    assert g._name_to_node.get("verifier-a") == "agent:verifier-a"
+
+
+def test_t_c3_meta_link_resolves_uuid_to_node_eagerly() -> None:
+    """T-C3: subagent_meta_link resolves hex→node immediately when _name_to_node is already set."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_omc_agent_use("verifier-b", tid="t1"))
+
+    # meta_link arrives after the tool_use → eager resolution.
+    g.update_from_event(_meta_link("bbbb1111cccc2222", "verifier-b"))
+
+    assert g._subagent_uuid_to_node.get("bbbb1111cccc2222") == "agent:verifier-b"
+
+
+def test_t_c4_meta_link_lazy_resolve_when_name_to_node_arrives_later() -> None:
+    """T-C4: meta_link arrives before tool_use → lazy resolve on first assistant event."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    # meta_link arrives FIRST (file discovered before main JSONL processed).
+    g.update_from_event(_meta_link("aaaa2222bbbb3333", "late-worker"))
+
+    # Not yet resolved — _name_to_node is empty.
+    assert g._subagent_uuid_to_node.get("aaaa2222bbbb3333") is None
+
+    # Now the Agent tool_use is processed.
+    g.update_from_event(_omc_agent_use("late-worker", tid="t1"))
+
+    # First assistant_message triggers lazy resolve and caches the result.
+    usage = _make_usage(inp=50, out=20)
+    g.update_from_event(_subagent_usage("aaaa2222bbbb3333", usage))
+
+    assert g._subagent_uuid_to_node.get("aaaa2222bbbb3333") == "agent:late-worker"
+    turn = g.get_turns()[0]
+    assert turn.input_tokens == 50
+
+
+def test_t_c5_omc_agent_tokens_go_to_standalone_bucket() -> None:
+    """T-C5: OMC team agent tokens appear in token_agents_standalone (no skill span)."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_omc_agent_use("exec-agent", tid="t1"))
+    g.update_from_event(_meta_link("exec1111aaaa2222", "exec-agent"))
+
+    usage = _make_usage(inp=120, out=60)
+    g.update_from_event(_subagent_usage("exec1111aaaa2222", usage))
+
+    turn = g.get_turns()[0]
+    assert "agent:exec-agent" in turn.token_agents_standalone
+    assert turn.token_agents_standalone["agent:exec-agent"]["tokens"]["input"] == 120
+    assert turn.input_tokens == 120  # Total includes agent
+
+
+def test_t_c6_two_omc_agents_accumulate_independently() -> None:
+    """T-C6: Two OMC team agents each get their own standalone bucket entry."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_omc_agent_use("agent-alpha", tid="t1"))
+    g.update_from_event(_omc_agent_use("agent-beta", tid="t2"))
+    g.update_from_event(_meta_link("alpha111", "agent-alpha"))
+    g.update_from_event(_meta_link("beta2222", "agent-beta"))
+
+    g.update_from_event(_subagent_usage("alpha111", _make_usage(inp=100, out=40)))
+    g.update_from_event(_subagent_usage("beta2222", _make_usage(inp=200, out=80)))
+
+    turn = g.get_turns()[0]
+    assert turn.token_agents_standalone["agent:agent-alpha"]["tokens"]["input"] == 100
+    assert turn.token_agents_standalone["agent:agent-beta"]["tokens"]["input"] == 200
+    assert turn.input_tokens == 300  # 100 + 200, no double-count
+
+
+def test_t_c7_meta_link_missing_fields_is_noop() -> None:
+    """T-C7: subagent_meta_link with missing hex_id or agent_type is silently ignored."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    # Missing agent_type.
+    changed = g.update_from_event(HarnessEvent(
+        type=EventType.subagent_meta_link,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"hex_id": "deadbeef1234"},
+    ))
+    assert changed is False
+
+    # Missing hex_id.
+    changed = g.update_from_event(HarnessEvent(
+        type=EventType.subagent_meta_link,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"agent_type": "some-agent"},
+    ))
+    assert changed is False
+
+    # Graph state should be clean.
+    assert g._pending_hex_to_type == {}
+
+
+def test_t_c8_subagent_type_still_works_for_native_agents() -> None:
+    """T-C8: Native Claude Code agents (subagent_type field, no name) are unaffected."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_agent_use("general-purpose", tid="t1"))
+
+    assert "agent:general-purpose" in g.nodes
+    # _name_to_node should not be populated (no input.name field).
+    assert g._name_to_node == {}
