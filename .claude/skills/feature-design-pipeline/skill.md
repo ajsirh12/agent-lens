@@ -143,9 +143,9 @@ task_06_user_review   (leader)                 → deps: [05 PASS]
 
 | 채널 | 용도 |
 |------|------|
-| SendMessage | 팀원 간 힌트 교환 (실시간, 1~3줄) |
+| SendMessage | 리더 ↔ 에이전트 에스컬레이션 전용 (에이전트 간 직접 통신 금지) |
 | TaskCreate/TaskUpdate | 진행상황, 의존성 관리 |
-| _workspace/{slug}/ 파일 | 구조화된 산출물 |
+| _workspace/{slug}/ 파일 | 에이전트 간 유일한 데이터 교환 채널 |
 
 파일 경로 규약:
 ```

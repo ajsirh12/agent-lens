@@ -158,9 +158,9 @@ task_09_docs                  (doc-writer)    → deps: [task_08 PASS]
 
 | 채널 | 용도 |
 |------|------|
-| SendMessage | 빠른 요청/응답 (1~3줄 + 파일 참조) |
+| SendMessage | 리더 ↔ 에이전트 에스컬레이션 전용 (에이전트 간 직접 통신 금지) |
 | TaskCreate/TaskUpdate | 진행상황, 의존성, iter 카운터 |
-| _workspace/{slug}/ 파일 | 구조화된 산출물, diff, 리포트 |
+| _workspace/{slug}/ 파일 | 에이전트 간 유일한 데이터 교환 채널 |
 
 파일 경로 규약:
 ```
@@ -184,7 +184,7 @@ task_09_docs                  (doc-writer)    → deps: [task_08 PASS]
 | 상충 데이터 | 출처 병기, 리더 판정 |
 | fixture 자체 오류 의심 | 즉시 에스컬레이션 (fixture 수정 금지) |
 | QA 3회 초과 | escalation.md + 사람 개입 |
-| Phase 1.5 불일치 | analyst 수정 1회, 3개+ 시 승격 |
+| Phase 1.5 불일치 | 01_5_schema_review.md에 기록 → 리더 판단 후 analyst 재조사, 3개+ 시 승격 |
 
 ## 테스트 시나리오
 
