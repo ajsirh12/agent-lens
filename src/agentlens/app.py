@@ -40,6 +40,7 @@ class AgentlensApp(App[int]):
         ("up", "cursor_up", "Up"),
         ("enter", "show_detail", "Detail"),
         ("d", "drill_down", "Subagent detail"),
+        ("t", "toggle_meta_turns", "Meta filter"),
         ("m", "toggle_mode", "Mode: All/Running"),
         ("o", "toggle_orientation", "Orient: TD/LR"),
         ("p", "toggle_pane_layout", "Panes: H/V"),
@@ -93,6 +94,7 @@ class AgentlensApp(App[int]):
         self._watcher_worker: Worker | None = None
         self._subagent_worker: Worker | None = None
         self._active_turn: int | None = None  # None = LIVE (current turn)
+        self._hide_meta_turns: bool = False
 
     def compose(self) -> ComposeResult:
         with Container(id="main"):
@@ -239,6 +241,8 @@ class AgentlensApp(App[int]):
         suffix = f"  nodes: {n} edges: {e}  [{mode_tag}/{orient_tag}/{pane_tag}]"
         if turn_label:
             suffix += f"  {turn_label}"
+        if self._hide_meta_turns:
+            suffix += "  [meta:hidden]"
         return suffix
 
     def _short_session_path(self) -> str:
@@ -451,6 +455,13 @@ class AgentlensApp(App[int]):
         if len(out) > 500:
             out = out[-500:]
         return out
+
+    def action_toggle_meta_turns(self) -> None:
+        """Toggle visibility of meta-span tool_use/tool_result rows in the Timeline."""
+        self._hide_meta_turns = not self._hide_meta_turns
+        if self._timeline is not None:
+            self._timeline.hide_meta = self._hide_meta_turns
+        self._update_footer()
 
     def action_toggle_mode(self) -> None:
         if self._flowchart is not None:
