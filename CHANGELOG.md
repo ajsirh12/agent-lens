@@ -8,6 +8,19 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [0.9.1] - 2026-04-15
+
+Fix: flow mode P1 — parallel/sequential spawns from same turn now render as fork (main→{A,B,C}) instead of vertical chain (A→B→C). Temporal predecessor inference removed; all top-level agents are now ROOT children in flow mode. 273 tests passing.
+
+### Fixed
+
+- **Flow mode parallel spawn heuristic** — `_flow_subgraph()` no longer infers temporal precedence from completion times. All agents spawned from ROOT (main) in the same turn now connect directly as fork children instead of forming a vertical chain when the earliest spawn completes before the next starts.
+  - Root cause: The heuristic had no `spawn_ts` reference and treated any completed predecessor as a sequential link. This broke the fork topology for parallel spawns.
+  - Solution: All FlowRecords now connect to ROOT as direct children in flow mode (fork layout). Sequential spawns are still ordered by start time within the `_flow_history` list, preserving logical causality at a higher level.
+- **4 regression tests rewritten** (v0.9.0 chain assertions → v0.9.1 fork assertions) + 4 new tests added for parallel/sequential spawn correctness. Test count: 269 → **273 passing**.
+
+---
+
 ## [0.9.0] - 2026-04-14
 
 Activity Sparkline in status footer. The footer now shows a rolling 8-bar

@@ -9,7 +9,7 @@ import pytest
 
 from agentlens.app import AgentlensApp
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import ROOT_ID, CallGraph
+from agentlens.graph_model import ROOT_ID, CallGraph, FlowRecord
 from agentlens.panels.flowchart import FlowchartPanel
 
 
@@ -146,22 +146,18 @@ def test_flow_subgraph_creates_per_invocation_nodes() -> None:
     assert len(sub.nodes) == 4
     assert ROOT_ID in sub.nodes
 
-    # 3 edges forming a chain: root->@0, @0->@1, @1->@2.
+    # 3 edges: root->@0, root->@1, root->@2 (all fork from ROOT).
     assert len(sub.edges) == 3
 
-    # Verify the chain links are correct.
+    # Verify all nodes connect directly to ROOT (fork, not chain).
     flow_ids = [nid for nid in sub.nodes if nid != ROOT_ID]
     assert len(flow_ids) == 3
-    # Edges should form root -> first -> second -> third.
-    # Starting from root, walk the chain.
-    cur = ROOT_ID
-    visited = []
-    for _ in range(3):
-        children = [c for (p, c) in sub.edges if p == cur]
-        assert len(children) == 1
-        cur = children[0]
-        visited.append(cur)
-    assert len(visited) == 3
+    vid_0, vid_1, vid_2 = sorted(flow_ids, key=lambda v: sub.nodes[v].last_ts)
+    assert (ROOT_ID, vid_0) in sub.edges
+    assert (ROOT_ID, vid_1) in sub.edges
+    assert (ROOT_ID, vid_2) in sub.edges
+    assert (vid_0, vid_1) not in sub.edges
+    assert (vid_1, vid_2) not in sub.edges
 
 
 # -------------------------------------------------------------------
@@ -330,11 +326,10 @@ def test_flow_sequential_after_parallel_joins() -> None:
         key=lambda nid: sub.nodes[nid].last_ts,
     )
     assert len(flow_ids) == 3
-    _, vid_b, vid_c = flow_ids[0], flow_ids[1], flow_ids[2]
+    vid_c = flow_ids[2]
 
-    # C starts at ts=10. Both A (end=5) and B (end=8) are completed.
-    # B finished last, so C's parent should be B's vid.
-    assert parent_of[vid_c] == vid_b
+    # C starts at ts=10. All nodes fork directly from ROOT (P1: no temporal chaining).
+    assert parent_of[vid_c] == ROOT_ID
 
 
 # -------------------------------------------------------------------
@@ -542,7 +537,165 @@ def test_real_completion_creates_sequential_chain() -> None:
     assert len(flow_ids) == 2
     vid_a, vid_b = flow_ids
 
-    # A chains from ROOT.
+    # A connects to ROOT.
     assert parent_of[vid_a] == ROOT_ID
-    # B chains from A (A completed with real duration before B started).
-    assert parent_of[vid_b] == vid_a
+    # B also connects to ROOT (P1: no temporal chaining regardless of completion duration).
+    assert parent_of[vid_b] == ROOT_ID
+
+
+# -------------------------------------------------------------------
+# Helpers for P1-fork regression tests (T19-T22)
+# -------------------------------------------------------------------
+
+
+@pytest.fixture
+def make_graph():
+    """Factory fixture: each call returns a fresh CallGraph."""
+    def _factory() -> CallGraph:
+        return CallGraph()
+    return _factory
+
+
+def _add_user_message(g: CallGraph, *, turn: int = 0) -> None:
+    """Advance the graph's turn counter to ``turn`` by feeding user_message events."""
+    # _current_turn_index starts at -1 and increments per user_message.
+    # Feed (turn + 1) messages to reach the desired index.
+    current = g.get_current_turn_index()
+    needed = turn - current
+    for _ in range(needed):
+        g.update_from_event(_user_message())
+
+
+def _add_flow_record(
+    g: CallGraph,
+    *,
+    node_id: str,
+    label: str,
+    turn: int,
+    started_ts: float,
+    ended_ts: float | None = None,
+    status: str = "running",
+    description: str = "",
+) -> None:
+    """Directly append a FlowRecord to ``g._flow_history`` for unit testing."""
+    rec = FlowRecord(
+        node_id=node_id,
+        tool_use_id=f"_test_{len(g._flow_history)}",
+        label=label,
+        description=description,
+        node_type="agent",
+        started_ts=started_ts,
+        ended_ts=ended_ts,
+        status=status,  # type: ignore[arg-type]
+        turn_index=turn,
+        is_background=False,
+    )
+    g._flow_history.append(rec)
+    g._flow_tid_to_index[rec.tool_use_id] = len(g._flow_history) - 1
+
+
+def _make_flowchart(g: CallGraph) -> FlowchartPanel:
+    """Create a FlowchartPanel whose internal graph is replaced with ``g``."""
+    panel = FlowchartPanel(mode="flow")
+    panel._graph = g
+    return panel
+
+
+# -------------------------------------------------------------------
+# 19. AC-1: Sequential spawns — both ROOT children (P1 regression guard)
+# -------------------------------------------------------------------
+def test_flow_subgraph_main_sequential_spawns_fork(make_graph):
+    """AC-1: A completes before B starts — both should be ROOT children (P1 regression guard)."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    # A spawns and completes
+    _add_flow_record(g, node_id="agent:planner", label="planner", turn=0,
+                     started_ts=1000.0, ended_ts=1005.0, status="done")
+    # B spawns after A completes — same turn
+    _add_flow_record(g, node_id="agent:executor", label="executor", turn=0,
+                     started_ts=1006.0, ended_ts=None, status="running")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()
+
+    vids = [v for v in sub.nodes if v != ROOT_ID]
+    assert len(vids) == 2
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    for vid in vids:
+        assert parent_of[vid] == ROOT_ID, f"{vid} should be ROOT child, got {parent_of[vid]}"
+    # No chain edge
+    vid_a = [v for v in vids if "planner" in v][0]
+    vid_b = [v for v in vids if "executor" in v][0]
+    assert (vid_a, vid_b) not in sub.edges
+
+
+# -------------------------------------------------------------------
+# 20. AC-2: Simultaneous spawns — both ROOT children
+# -------------------------------------------------------------------
+def test_flow_subgraph_simultaneous_spawn_forks(make_graph):
+    """AC-2: Simultaneous spawns (same ts) — both ROOT children."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    ts = 1000.0
+    _add_flow_record(g, node_id="agent:alpha", label="alpha", turn=0,
+                     started_ts=ts, ended_ts=None, status="running")
+    _add_flow_record(g, node_id="agent:beta", label="beta", turn=0,
+                     started_ts=ts, ended_ts=None, status="running")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    for vid in sub.nodes:
+        if vid == ROOT_ID:
+            continue
+        assert parent_of[vid] == ROOT_ID
+
+
+# -------------------------------------------------------------------
+# 21. AC-5: Exact boundary timestamp — B is ROOT child (not chained)
+# -------------------------------------------------------------------
+def test_flow_subgraph_exact_equality_does_not_chain(make_graph):
+    """AC-5: A.ended_ts == B.started_ts — B should still be ROOT child (not chained)."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    boundary_ts = 1005.0
+    _add_flow_record(g, node_id="agent:alpha", label="alpha", turn=0,
+                     started_ts=1000.0, ended_ts=boundary_ts, status="done")
+    _add_flow_record(g, node_id="agent:beta", label="beta", turn=0,
+                     started_ts=boundary_ts, ended_ts=None, status="running")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    vid_b = [v for v in sub.nodes if "beta" in v][0]
+    assert parent_of[vid_b] == ROOT_ID
+
+
+# -------------------------------------------------------------------
+# 22. AC-6: Edge-case FlowRecords must not raise, all nodes ROOT children
+# -------------------------------------------------------------------
+def test_flow_subgraph_handles_arbitrary_records_without_raising(make_graph):
+    """AC-6: Various edge-case FlowRecords must not raise, all nodes ROOT children."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    # Empty description
+    _add_flow_record(g, node_id="agent:x", label="x", turn=0,
+                     started_ts=1000.0, ended_ts=None, status="running",
+                     description="")
+    # None ended_ts (still running)
+    _add_flow_record(g, node_id="agent:y", label="y", turn=0,
+                     started_ts=1001.0, ended_ts=None, status="running")
+    # status=error
+    _add_flow_record(g, node_id="agent:z", label="z", turn=0,
+                     started_ts=1002.0, ended_ts=1003.0, status="error")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()  # must not raise
+
+    flow_nodes = [v for v in sub.nodes if v != ROOT_ID]
+    assert len(flow_nodes) == 3
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    for vid in flow_nodes:
+        assert parent_of[vid] == ROOT_ID

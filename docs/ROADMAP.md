@@ -224,32 +224,15 @@ that moment's state.
 Currently edges connect each node to the "most recent completed
 predecessor". Four known problems, ordered by fix priority:
 
-### P1. Parallel spawn collapses into vertical chain `[priority: 1]`
+### P1. Parallel spawn collapses into vertical chain `[FIXED in v0.9.1]`
 
-When 3 agents spawn from `main` simultaneously, if any one of them
+~~When 3 agents spawn from `main` simultaneously, if any one of them
 completes (≥0.5s duration) before the next starts, the temporal
-heuristic treats it as a sequential predecessor:
+heuristic treats it as a sequential predecessor~~
 
-```
-Expected:  main → A
-           main → B   (fork)
-           main → C
-
-Actual:    main → A → B → C  (chain)
-```
-
-**Root cause**: `FlowRecord` has no `spawn_ts`. The heuristic cannot
-tell whether nodes were spawned in the same assistant message or truly
-sequentially.
-
-**Fix**: Add `spawn_ts: float` to `FlowRecord`, set it to the
-assistant message timestamp at spawn time. In `_flow_subgraph()`,
-skip the "completed predecessor" lookup when `abs(rec.spawn_ts -
-candidate.spawn_ts) <= 0.5` — those nodes are simultaneous forks and
-should share the same parent directly.
-
-**Scope**: `graph_model.py` (FlowRecord + `_handle_tool_use`),
-`_flow_subgraph()` in `flowchart.py`. ~30 LOC + 4–5 tests.
+**Resolved**: All FlowRecords now connect directly to ROOT as children
+in flow mode (pure fork layout). Temporal predecessor inference removed.
+Fixed in v0.9.1.
 
 ---
 

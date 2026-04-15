@@ -268,21 +268,11 @@ class FlowchartPanel(ScrollableContainer):
         return sub
 
     def _flow_subgraph(self) -> CallGraph:
-        """Build a temporal execution DAG from session-persistent FlowRecords.
+        """Build a flow execution DAG from session-persistent FlowRecords.
 
-        Each invocation becomes its own Node. Temporal edges connect
-        each node to the most recently completed predecessor -- the
-        latest node whose ended_ts <= this node's started_ts. This
-        naturally produces forks for parallel spawns and joins for
-        sequential continuations.
-
-        Unlike the old Instance-based approach, FlowRecords survive
-        user_message flushes so the full session history is preserved.
-
-        When ``self._active_turn`` is set, only FlowRecords matching
-        that turn_index are included. The ``completed`` predecessor
-        list operates only on the filtered subset to prevent cross-turn
-        edges.
+        Each invocation becomes its own Node parented to ROOT. Sibling
+        spawns within the same turn render as a fork from main. (See
+        docs/ROADMAP.md §5-P1 for why temporal parent inference was removed.)
         """
         sub = CallGraph()
 
@@ -290,8 +280,7 @@ class FlowchartPanel(ScrollableContainer):
         if not history:
             return sub
 
-        # Always filter by turn — LIVE shows the current turn only
-        # (not the entire session), past turns are browsable via [/].
+        # Always filter by turn — LIVE shows the current turn only.
         turn = self._active_turn
         if turn is None:
             turn = self._graph.get_current_turn_index()
@@ -299,18 +288,6 @@ class FlowchartPanel(ScrollableContainer):
             history = [r for r in history if r.turn_index == turn]
             if not history:
                 return sub
-
-        # Track completed nodes in chronological order of their end time.
-        # Two lists: foreground completions (usable by any successor) and
-        # all completions including background (usable only by non-background).
-        # Background agents spawned together should share a parent, not
-        # chain through each other.
-        #
-        # Each entry: (ended_ts, vid).
-        completed_fg: list[tuple[float, str]] = []  # foreground only
-        completed_all: list[tuple[float, str]] = []  # fg + background
-
-        _MIN_REAL_DURATION = 0.5
 
         for i, rec in enumerate(history):
             vid = f"{rec.node_id}@{i}"
@@ -323,31 +300,9 @@ class FlowchartPanel(ScrollableContainer):
                 call_count=1,
                 last_ts=rec.started_ts,
             )
-
-            # Find parent: the most recently COMPLETED node whose
-            # end time is <= this node's start time.
-            # Background agents only look at foreground completions so
-            # parallel background spawns share the same parent instead
-            # of chaining through each other.
-            parent = ROOT_ID
-            source = completed_fg if rec.is_background else completed_all
-            for end_ts, completed_vid in reversed(source):
-                if end_ts <= rec.started_ts:
-                    parent = completed_vid
-                    break
-
-            sub.edges[(parent, vid)] = Edge(
-                parent_id=parent, child_id=vid, count=1,
+            sub.edges[(ROOT_ID, vid)] = Edge(
+                parent_id=ROOT_ID, child_id=vid, count=1,
             )
-
-            # Add to completed lists if genuinely finished.
-            if rec.ended_ts is not None and (rec.ended_ts - rec.started_ts) >= _MIN_REAL_DURATION:
-                entry = (rec.ended_ts, vid)
-                completed_all.append(entry)
-                completed_all.sort(key=lambda x: x[0])
-                if not rec.is_background:
-                    completed_fg.append(entry)
-                    completed_fg.sort(key=lambda x: x[0])
 
         return sub
 
