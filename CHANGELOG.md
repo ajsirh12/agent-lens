@@ -21,6 +21,43 @@ Fix: flow mode P1 — parallel/sequential spawns from same turn now render as fo
 
 ---
 
+## [0.9.2] - 2026-04-15
+
+Flow mode now shows nested sub-agents and skills as children of their parent
+node instead of collapsing onto ROOT. `FlowRecord.parent_node_id` field added
+(backward-compatible, defaults to ROOT_ID). 30 tests passing (+7).
+
+### Added
+
+- **Nested node visibility in flow mode** — When an agent or skill spawns a
+  child agent or skill, the child now appears directly under its parent node
+  in the flowchart instead of floating at the root level. Example: `main →
+  agent-a → {skill:req-extraction}` instead of `main → agent-a` + separate
+  `main → skill:req-extraction` branch.
+- **`FlowRecord.parent_node_id` field** — Explicit parent link for each
+  invocation. Defaults to ROOT_ID if not set, maintaining backward
+  compatibility with earlier flow records. Enables `_flow_subgraph()` to build
+  a proper tree topology instead of a flat fork list.
+
+### Changed
+
+- **`_flow_subgraph()` tree builder** in `flowchart.py` — now builds nested
+  children via `parent_node_id` instead of flattening all records to ROOT
+  children. Nested children render at depth=parent_depth+1 in the flowchart
+  layout.
+- **`_handle_nested_spawn()`** in `graph_model.py` — now creates FlowRecords
+  for nested agent/skill spawns (previously only handled running-mode
+  `Instance` ancestry). Assigns `parent_node_id` to link the child to its
+  spawning parent.
+
+### Tests
+
+- Full suite: 23 → **30 passing** (+7). New test file:
+  `tests/test_flow_mode.py` (tests T23–T30 covering nested spawn flow
+  topology, parent-child edge correctness, and nested depth rendering).
+
+---
+
 ## [0.9.0] - 2026-04-14
 
 Activity Sparkline in status footer. The footer now shows a rolling 8-bar

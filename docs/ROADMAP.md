@@ -18,6 +18,7 @@ actionable later without reconstructing the reasoning.
 | v0.8.1 | Subagent token breakdown in Turn Summary; OMC team agent attribution fix (`.meta.json` → OMC name mapping, `_name_to_node` lazy resolve) |
 | v0.9.0 | Activity Sparkline in status footer (8-bar events/sec histogram, `peak: N/s`, narrow-terminal suppression) |
 | v0.9.0 | Harness: 7 agents, 9 skills (incl. orchestrator), model routing (haiku/sonnet/opus + dynamic promotion), Phase 1→1.5→2→3→4 pipeline with QA retry loop (max 3) |
+| v0.9.2 | Nested spawn FlowRecord + tree topology (nested children now appear under parent node in flow mode) |
 | — | M-AC8-idle automated (test_idle_footer.py); M-AC11 measured at 0.16% idle CPU |
 
 ---
@@ -236,7 +237,19 @@ Fixed in v0.9.1.
 
 ---
 
-### P2. Running nodes excluded from parent chain `[priority: 2]`
+### P2. Nested node children visible in flow `[FIXED in v0.9.2]`
+
+~~When an agent or skill spawned a nested child agent/skill, the child appeared
+as a ROOT sibling instead of appearing under its true parent~~ 
+
+**Resolved**: `FlowRecord.parent_node_id` field added to track nested
+invocation parentage. `_flow_subgraph()` now builds a tree with `parent_node_id`
+edges instead of flattening to ROOT children. Tree depth and edge routing
+correctly display nested spawns under their parent. Fixed in v0.9.2.
+
+---
+
+### P3. Running nodes excluded from parent chain `[priority: 2]`
 
 A node only enters `completed_*` after it finishes. While A is still
 running, if A spawns B, B's parent resolves to the last completed node
@@ -261,7 +274,7 @@ active node's `started_ts < rec.started_ts`. Clear entries from
 
 ---
 
-### P3. Description length uncapped `[priority: 3]`
+### P4. Description length uncapped `[priority: 3]`
 
 `flow_label = rec.description if rec.description else rec.label`
 
@@ -276,7 +289,7 @@ the `[all]` mode truncation rule.
 
 ---
 
-### P4. turn=-1 skips filter, shows full history `[priority: 4]`
+### P5. turn=-1 skips filter, shows full history `[priority: 4]`
 
 ```python
 if turn >= 0:   # turn=-1 (before first user_message) skips this
@@ -296,16 +309,17 @@ subgraph, consistent with other modes.
 
 ### Cost
 
-- P1: ~1.5h + 4–5 tests. Touches graph model and flowchart.
-- P2: ~1h + 3–4 tests. Flowchart only.
-- P3: ~15min + 1–2 tests. One-liner.
-- P4: ~15min + 1 test. One-liner.
-- Total: ~3h + ~12 tests.
+- P1: ~1.5h + 4–5 tests. Touches graph model and flowchart. **[FIXED v0.9.1]**
+- P2: ~2h + 7 tests. Touches graph model and flowchart. **[FIXED v0.9.2]**
+- P3: ~1h + 3–4 tests. Flowchart only.
+- P4: ~15min + 1–2 tests. One-liner.
+- P5: ~15min + 1 test. One-liner.
+- Total remaining: ~1.5h + ~6 tests.
 
 ### When to do it
 
-Fix in order (P1 → P2 → P3 → P4). P1 is the most visible — skip it
-only if flow mode is never used with parallel spawns.
+Fix in order (P3 → P4 → P5). P1 and P2 are complete. P3 is next priority
+(description length capping for layout stability).
 
 ---
 

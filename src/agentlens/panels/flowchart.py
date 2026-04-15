@@ -270,9 +270,14 @@ class FlowchartPanel(ScrollableContainer):
     def _flow_subgraph(self) -> CallGraph:
         """Build a flow execution DAG from session-persistent FlowRecords.
 
-        Each invocation becomes its own Node parented to ROOT. Sibling
-        spawns within the same turn render as a fork from main. (See
-        docs/ROADMAP.md §5-P1 for why temporal parent inference was removed.)
+        Top-level invocations (parent_node_id == ROOT_ID) attach to ROOT,
+        preserving the P1 fork semantics. Nested invocations
+        (parent_node_id is a base node id) attach to the most recent vid
+        of that node_id within the current turn filter; if the parent
+        vid is not found (filtered out or dropped), fall back to ROOT.
+
+        See docs/ROADMAP.md §5-P1 (temporal heuristic removal) and
+        §5-P2 (nested tree restoration).
         """
         sub = CallGraph()
 
@@ -289,6 +294,10 @@ class FlowchartPanel(ScrollableContainer):
             if not history:
                 return sub
 
+        # AMB-3: track most recent vid per base node_id so nested children
+        # can resolve their parent vid during the same pass.
+        last_vid_by_node_id: dict[str, str] = {}
+
         for i, rec in enumerate(history):
             vid = f"{rec.node_id}@{i}"
             flow_label = rec.description if rec.description else rec.label
@@ -300,9 +309,21 @@ class FlowchartPanel(ScrollableContainer):
                 call_count=1,
                 last_ts=rec.started_ts,
             )
-            sub.edges[(ROOT_ID, vid)] = Edge(
-                parent_id=ROOT_ID, child_id=vid, count=1,
+
+            # Determine parent vid. Default to ROOT_ID (P1 behavior).
+            parent_vid = ROOT_ID
+            pnid = getattr(rec, "parent_node_id", ROOT_ID)
+            if pnid and pnid != ROOT_ID:
+                parent_vid = last_vid_by_node_id.get(pnid, ROOT_ID)
+
+            sub.edges[(parent_vid, vid)] = Edge(
+                parent_id=parent_vid, child_id=vid, count=1,
             )
+
+            # Update the registry AFTER writing the edge so a child never
+            # resolves to its own vid (guards against pathological
+            # self-parent records).
+            last_vid_by_node_id[rec.node_id] = vid
 
         return sub
 

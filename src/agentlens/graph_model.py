@@ -187,6 +187,7 @@ class FlowRecord:
     status: NodeStatus = "running"
     turn_index: int = 0
     is_background: bool = False
+    parent_node_id: str = ROOT_ID  # nested spawn의 부모 node_id; top-level은 기본값 ROOT_ID
 
 
 @dataclass
@@ -909,6 +910,34 @@ class CallGraph:
         tid = ev.tool_use_id
         if tid:
             self._tool_use_to_node[tid] = child_id
+
+        # Create FlowRecord for nested spawn so flow mode can render the
+        # child under its structural parent. Mirrors the _handle_tool_use
+        # pattern; parent_node_id carries the real parent (not ROOT_ID).
+        if tid and len(self._flow_history) < MAX_NODES:
+            desc = ""
+            raw_desc = inp.get("description")
+            if isinstance(raw_desc, str):
+                desc = raw_desc
+            flow_rec = FlowRecord(
+                node_id=child_id,
+                tool_use_id=tid,
+                label=label,
+                description=desc,
+                node_type=ntype,
+                started_ts=ts_epoch,
+                ended_ts=None,
+                status="running",
+                turn_index=(
+                    self._current_turn_index
+                    if self._current_turn_index >= 0 else 0
+                ),
+                is_background=False,
+                parent_node_id=parent_id,
+            )
+            self._flow_history.append(flow_rec)
+            self._flow_tid_to_index[tid] = len(self._flow_history) - 1
+            changed = True
 
         return changed
 

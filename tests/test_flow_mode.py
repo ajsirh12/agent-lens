@@ -9,7 +9,7 @@ import pytest
 
 from agentlens.app import AgentlensApp
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import ROOT_ID, CallGraph, FlowRecord
+from agentlens.graph_model import MAX_NODES, ROOT_ID, CallGraph, FlowRecord, Node
 from agentlens.panels.flowchart import FlowchartPanel
 
 
@@ -576,6 +576,8 @@ def _add_flow_record(
     ended_ts: float | None = None,
     status: str = "running",
     description: str = "",
+    node_type: str = "agent",
+    parent_node_id: str | None = None,
 ) -> None:
     """Directly append a FlowRecord to ``g._flow_history`` for unit testing."""
     rec = FlowRecord(
@@ -583,13 +585,16 @@ def _add_flow_record(
         tool_use_id=f"_test_{len(g._flow_history)}",
         label=label,
         description=description,
-        node_type="agent",
+        node_type=node_type,  # type: ignore[arg-type]
         started_ts=started_ts,
         ended_ts=ended_ts,
         status=status,  # type: ignore[arg-type]
         turn_index=turn,
         is_background=False,
     )
+    # parent_node_id is added by P2 (graph-model-engineer); set if provided.
+    if parent_node_id is not None:
+        rec.parent_node_id = parent_node_id  # type: ignore[attr-defined]
     g._flow_history.append(rec)
     g._flow_tid_to_index[rec.tool_use_id] = len(g._flow_history) - 1
 
@@ -699,3 +704,320 @@ def test_flow_subgraph_handles_arbitrary_records_without_raising(make_graph):
     parent_of = {child: parent for (parent, child) in sub.edges}
     for vid in flow_nodes:
         assert parent_of[vid] == ROOT_ID
+
+
+# -------------------------------------------------------------------
+# Helpers for P2-nested regression tests (T23-T30)
+# -------------------------------------------------------------------
+
+def _nested_spawn_event(
+    tool_name: str,
+    subagent_uuid: str,
+    *,
+    tid: str = "t-nested-1",
+    subagent_type: str = "executor",
+    skill_name: str = "probe",
+    description: str = "",
+) -> HarnessEvent:
+    """Construct a subagent tool_use event that routes to _handle_nested_spawn."""
+    inp: dict = {}
+    if tool_name in ("Agent", "Task"):
+        inp["subagent_type"] = subagent_type
+        if description:
+            inp["description"] = description
+    else:  # Skill
+        inp["skill"] = skill_name
+        if description:
+            inp["description"] = description
+    return HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={
+            "tool_name": tool_name,
+            "tool_use_id": tid,
+            "input": inp,
+            "subagent_uuid": subagent_uuid,
+        },
+    )
+
+
+def _setup_parent_node(g: CallGraph, node_id: str, uuid: str) -> None:
+    """Register a parent node and its uuid mapping so _handle_nested_spawn resolves it."""
+    if node_id not in g.nodes:
+        g.nodes[node_id] = Node(
+            id=node_id,
+            label=node_id.split(":", 1)[-1],
+            node_type="agent",
+            status="running",
+            call_count=1,
+            last_ts=0.0,
+        )
+    g._subagent_uuid_to_node[uuid] = node_id
+
+
+# -------------------------------------------------------------------
+# 23. T23: nested skill appears as child of parent agent in flow mode
+# -------------------------------------------------------------------
+def test_flow_nested_child_attaches_to_parent_vid(make_graph):
+    """AC1: nested FlowRecord with parent_node_id attaches to parent vid, not ROOT."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    _add_flow_record(g, node_id="agent:executor", label="executor", turn=0,
+                     started_ts=1000.0, ended_ts=None, status="running")
+    _add_flow_record(g, node_id="skill:probe", label="probe", turn=0,
+                     started_ts=1001.0, ended_ts=None, status="running",
+                     node_type="skill", parent_node_id="agent:executor")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    vid_parent = "agent:executor@0"
+    vid_child = "skill:probe@1"
+    assert vid_parent in sub.nodes
+    assert vid_child in sub.nodes
+    assert parent_of[vid_child] == vid_parent, (
+        f"skill:probe@1 should be child of agent:executor@0, got {parent_of[vid_child]}"
+    )
+    assert (ROOT_ID, vid_child) not in sub.edges
+
+
+# -------------------------------------------------------------------
+# 24. T24: nested child attaches correctly when parent still running
+# -------------------------------------------------------------------
+def test_flow_nested_child_attaches_when_parent_still_running(make_graph):
+    """AC2: parent ended_ts=None (still running) does not break child attachment."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    _add_flow_record(g, node_id="agent:executor", label="executor", turn=0,
+                     started_ts=1000.0, ended_ts=None, status="running")
+    _add_flow_record(g, node_id="skill:probe", label="probe", turn=0,
+                     started_ts=1001.0, ended_ts=None, status="running",
+                     node_type="skill", parent_node_id="agent:executor")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()  # must not raise
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    vid_child = "skill:probe@1"
+    assert parent_of[vid_child] == "agent:executor@0"
+
+
+# -------------------------------------------------------------------
+# 25. T25: turn filter excludes nodes from other turns, preserves parent-child
+# -------------------------------------------------------------------
+def test_flow_nested_turn_filter_consistency(make_graph):
+    """AC3: turn filter applies to all nodes; nested parent-child preserved within turn."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    # turn 0: A and nested B
+    _add_flow_record(g, node_id="agent:alpha", label="alpha", turn=0,
+                     started_ts=1000.0, ended_ts=None, status="running")
+    _add_flow_record(g, node_id="skill:probe", label="probe", turn=0,
+                     started_ts=1001.0, ended_ts=None, status="running",
+                     node_type="skill", parent_node_id="agent:alpha")
+    # turn 1: top-level C (different turn)
+    _add_flow_record(g, node_id="agent:gamma", label="gamma", turn=1,
+                     started_ts=2000.0, ended_ts=None, status="running")
+
+    fc = _make_flowchart(g)
+    fc._active_turn = 0
+    sub = fc._flow_subgraph()
+
+    flow_ids = [v for v in sub.nodes if v != ROOT_ID]
+    assert len(flow_ids) == 2
+    node_labels = {sub.nodes[v].label for v in flow_ids}
+    assert "alpha" in node_labels
+    assert "probe" in node_labels
+    assert "gamma" not in node_labels
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    vid_child = "skill:probe@1"
+    assert parent_of[vid_child] == "agent:alpha@0"
+
+
+# -------------------------------------------------------------------
+# 26. T26: ROOT fallback when parent_node_id has no matching FlowRecord
+# -------------------------------------------------------------------
+def test_flow_nested_falls_back_to_root_when_parent_missing(make_graph):
+    """AC4: child FlowRecord whose parent is absent falls back to ROOT, no exception."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    # Child references a parent that was never added to _flow_history
+    _add_flow_record(g, node_id="skill:orphan", label="orphan", turn=0,
+                     started_ts=1000.0, ended_ts=None, status="running",
+                     node_type="skill", parent_node_id="agent:ghost")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()  # must not raise
+
+    flow_ids = [v for v in sub.nodes if v != ROOT_ID]
+    assert len(flow_ids) == 1
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    assert parent_of["skill:orphan@0"] == ROOT_ID
+
+
+# -------------------------------------------------------------------
+# 27. T27: _handle_nested_spawn appends FlowRecord and respects MAX_NODES cap
+# -------------------------------------------------------------------
+def test_handle_nested_spawn_appends_flow_record_and_respects_cap():
+    """AC5: FlowRecord created when cap not reached; silently skipped when at cap."""
+    # Part a: cap not reached — FlowRecord is appended and tid is registered
+    g_a = CallGraph()
+    g_a.update_from_event(_agent_use("executor", tid="t-parent"))
+    parent_node_id = "agent:executor"
+    parent_uuid = "uuid-exec-001"
+    _setup_parent_node(g_a, parent_node_id, parent_uuid)
+    initial_len = len(g_a._flow_history)
+
+    ev = _nested_spawn_event("Skill", parent_uuid, tid="t-nested-1", skill_name="probe")
+    g_a.update_from_event(ev)
+
+    assert len(g_a._flow_history) == initial_len + 1
+    assert "t-nested-1" in g_a._flow_tid_to_index
+    rec = g_a._flow_history[-1]
+    assert rec.node_id == "skill:probe"
+    assert rec.parent_node_id == parent_node_id  # type: ignore[attr-defined]
+
+    # Part b: history at cap — FlowRecord NOT appended, no exception
+    g_b = CallGraph()
+    _setup_parent_node(g_b, parent_node_id, parent_uuid)
+    # Fill _flow_history to MAX_NODES using the helper
+    for i in range(MAX_NODES):
+        g_b._flow_history.append(
+            FlowRecord(
+                node_id=f"agent:dummy{i}",
+                tool_use_id=f"_cap_{i}",
+                label=f"dummy{i}",
+                description="",
+                node_type="agent",
+                started_ts=float(i),
+            )
+        )
+    assert len(g_b._flow_history) == MAX_NODES
+
+    ev_b = _nested_spawn_event("Skill", parent_uuid, tid="t-nested-cap", skill_name="probe")
+    g_b.update_from_event(ev_b)  # must not raise
+
+    assert len(g_b._flow_history) == MAX_NODES, "FlowRecord must not be appended when at cap"
+    assert "t-nested-cap" not in g_b._flow_tid_to_index
+
+
+# -------------------------------------------------------------------
+# 28. T28: _handle_nested_spawn never raises on edge-case inputs
+# -------------------------------------------------------------------
+def test_handle_nested_spawn_never_raises_on_edge_inputs():
+    """AC6: _handle_nested_spawn is never-raise for malformed inputs."""
+    parent_uuid = "uuid-exec-002"
+    g = CallGraph()
+    _setup_parent_node(g, "agent:executor", parent_uuid)
+
+    # Case 1: ts=None (HarnessEvent.ts may be None in edge cases)
+    ev1 = HarnessEvent(
+        type=EventType.tool_use,
+        ts=None,  # type: ignore[arg-type]
+        agent_id=None,
+        payload={
+            "tool_name": "Skill",
+            "tool_use_id": "t-edge-1",
+            "input": {"skill": "probe"},
+            "subagent_uuid": parent_uuid,
+        },
+    )
+    try:
+        g.update_from_event(ev1)
+    except Exception as exc:
+        raise AssertionError(f"update_from_event raised on ts=None: {exc}") from exc
+
+    # Case 2: input dict has no 'description' key
+    ev2 = _nested_spawn_event("Skill", parent_uuid, tid="t-edge-2", skill_name="probe2")
+    try:
+        g.update_from_event(ev2)
+    except Exception as exc:
+        raise AssertionError(f"update_from_event raised without description key: {exc}") from exc
+
+    # Case 3: tid is missing (tool_use_id absent)
+    ev3 = HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={
+            "tool_name": "Skill",
+            "input": {"skill": "probe3"},
+            "subagent_uuid": parent_uuid,
+        },
+    )
+    try:
+        g.update_from_event(ev3)
+    except Exception as exc:
+        raise AssertionError(f"update_from_event raised with missing tid: {exc}") from exc
+
+    # Case 4: unknown parent uuid (not in _subagent_uuid_to_node)
+    ev4 = _nested_spawn_event("Agent", "uuid-unknown-999", tid="t-edge-4")
+    try:
+        g.update_from_event(ev4)
+    except Exception as exc:
+        raise AssertionError(f"update_from_event raised with unknown parent uuid: {exc}") from exc
+
+
+# -------------------------------------------------------------------
+# 29. T29: nested Skill spawn renders as skill:<name>@<i> child of parent agent
+# -------------------------------------------------------------------
+def test_flow_nested_skill_spawn_renders(make_graph):
+    """AC7: skill nested spawn renders as skill:<name>@<i> vid under parent agent vid."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+    _add_flow_record(g, node_id="agent:executor", label="executor", turn=0,
+                     started_ts=1000.0, ended_ts=None, status="running")
+    _add_flow_record(g, node_id="skill:my-skill", label="my-skill", turn=0,
+                     started_ts=1001.0, ended_ts=None, status="running",
+                     node_type="skill", parent_node_id="agent:executor")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()
+
+    skill_vids = [v for v in sub.nodes if v.startswith("skill:")]
+    assert len(skill_vids) == 1
+    skill_vid = skill_vids[0]
+    assert skill_vid == "skill:my-skill@1"
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+    assert parent_of[skill_vid] == "agent:executor@0"
+
+
+# -------------------------------------------------------------------
+# 30. T30: same node_id multiple invocations — AMB-3 last-vid rule
+# -------------------------------------------------------------------
+def test_flow_nested_same_node_id_multiple_invocations(make_graph):
+    """AC8: B#1 is child of A#1 vid; B#2 is child of A#2 vid (last-vid rule)."""
+    g = make_graph()
+    _add_user_message(g, turn=0)
+
+    # A invoke #1 (i=0)
+    _add_flow_record(g, node_id="agent:alpha", label="alpha", turn=0,
+                     started_ts=1000.0, ended_ts=1005.0, status="done")
+    # B nested under A#1 (i=1)
+    _add_flow_record(g, node_id="skill:probe", label="probe", turn=0,
+                     started_ts=1001.0, ended_ts=1003.0, status="done",
+                     node_type="skill", parent_node_id="agent:alpha")
+    # A invoke #2 (i=2)
+    _add_flow_record(g, node_id="agent:alpha", label="alpha", turn=0,
+                     started_ts=1010.0, ended_ts=1015.0, status="done")
+    # B nested under A#2 (i=3) — should attach to A's most recent vid (i=2)
+    _add_flow_record(g, node_id="skill:probe", label="probe", turn=0,
+                     started_ts=1011.0, ended_ts=1013.0, status="done",
+                     node_type="skill", parent_node_id="agent:alpha")
+
+    fc = _make_flowchart(g)
+    sub = fc._flow_subgraph()
+
+    parent_of = {child: parent for (parent, child) in sub.edges}
+
+    # vid indices: alpha@0, probe@1, alpha@2, probe@3
+    assert parent_of["skill:probe@1"] == "agent:alpha@0", (
+        f"probe@1 should be child of alpha@0, got {parent_of['skill:probe@1']}"
+    )
+    assert parent_of["skill:probe@3"] == "agent:alpha@2", (
+        f"probe@3 should be child of alpha@2, got {parent_of['skill:probe@3']}"
+    )
