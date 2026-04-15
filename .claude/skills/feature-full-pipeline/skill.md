@@ -1,11 +1,11 @@
 ---
 name: feature-full-pipeline
-description: "설계부터 구현까지 한 번에 실행하는 통합 오케스트레이터. feature-design-pipeline(설계+리뷰)→사용자 게이트→agentlens-feature-pipeline(구현+리뷰)을 순차 실행한다. '처음부터 끝까지 해줘', '설계하고 바로 구현까지', 'end-to-end', '풀 파이프라인', '전부 자동으로 해줘' 등 설계+구현 통합 요청 시 반드시 이 스킬을 사용할 것. 설계만 요청('설계해줘') 또는 구현만 요청('구현해줘')에는 각각의 전용 파이프라인을 사용할 것."
+description: "설계부터 구현까지 한 번에 실행하는 통합 오케스트레이터. feature-design-pipeline(설계+리뷰)→agentlens-feature-pipeline(구현+리뷰)을 사용자 승인 없이 순차 실행한다. '처음부터 끝까지 해줘', '설계하고 바로 구현까지', 'end-to-end', '풀 파이프라인', '전부 자동으로 해줘' 등 설계+구현 통합 요청 시 반드시 이 스킬을 사용할 것. 설계만 요청('설계해줘') 또는 구현만 요청('구현해줘')에는 각각의 전용 파이프라인을 사용할 것."
 ---
 
 # Feature Full Pipeline — End-to-End Orchestrator
 
-설계와 구현을 한 번에 실행한다. 두 기존 파이프라인을 순차로 호출하며, 중간에 사용자 승인 게이트를 둔다.
+설계와 구현을 한 번에 실행한다. 두 기존 파이프라인을 순차로 호출한다. 사용자 승인 게이트 없이 설계 완료 즉시 구현으로 진행한다.
 
 ## Phase 0: Slug 생성
 
@@ -24,24 +24,12 @@ description: "설계부터 구현까지 한 번에 실행하는 통합 오케스
 
 완료 시 `_workspace/{slug}/design_spec.md` + `design_review.md (verdict: pass)`가 존재한다.
 
-## Phase 2: 사용자 승인 게이트
+## Phase 2: 설계 → 구현 자동 전환
 
-설계 결과를 사용자에게 제시하고 진행 여부를 묻는다.
+`design_spec.md`가 생성되고 `design_review.md`가 PASS이면 즉시 Phase 3으로 진행한다. 사용자 확인 없음.
 
-**기본 동작: 승인 대기**
-- 사용자에게 `design_spec.md` 요약 제시
-- "결정 필요" 항목이 있으면 우선 질문
-- 응답: `approve` / `reject` / `modify`
-
-**자동 모드:** 사용자 발화에 "자동으로", "승인 없이", "--auto"가 포함되면 게이트 스킵. 단 "결정 필요" 항목이 있으면 자동 모드에서도 **반드시 사용자에 질문**한다 (임의 선택 금지).
-
-**사용자 응답 처리:**
-
-| 응답 | 동작 |
-|------|------|
-| approve | Phase 3으로 |
-| reject | 파이프라인 종료, `_workspace/{slug}/user_rejection.md` 기록 |
-| modify | 피드백을 해당 에이전트에 전달하여 Phase 1 재실행 (해당 부분만) |
+**단, 다음 경우에만 일시 중단하여 사용자에게 질문한다:**
+- `design_spec.md`에 "결정 필요" 항목이 있는 경우 (임의 선택 금지)
 
 ## Phase 3: 구현 파이프라인 실행
 
@@ -66,11 +54,11 @@ description: "설계부터 구현까지 한 번에 실행하는 통합 오케스
 ## 작업 의존성 DAG
 
 ```
-task_00_slug           (leader)                 → deps: []
-task_01_design         (feature-design-pipeline)→ deps: [task_00]
-task_02_user_gate      (leader + user)          → deps: [task_01]
-task_03_implement      (agentlens-feature-pipeline) → deps: [task_02 approve]
-task_04_summary        (leader)                 → deps: [task_03]
+task_00_slug           (leader)                      → deps: []
+task_01_design         (feature-design-pipeline)     → deps: [task_00]
+task_02_auto_gate      (leader)                      → deps: [task_01] — "결정 필요" 있으면 일시 중단, 없으면 즉시 통과
+task_03_implement      (agentlens-feature-pipeline)  → deps: [task_02]
+task_04_summary        (leader)                      → deps: [task_03]
 ```
 
 ## 에러 핸들링
