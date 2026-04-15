@@ -19,14 +19,52 @@ description: "자연어 기능 요청을 구조화된 설계 문서로 변환하
 
 스킬 로드 즉시 아래 Phase 0부터 실행한다. 직접 설계 문서를 작성하거나 분석 결과를 텍스트로 출력하는 것은 금지다.
 
-## Phase 0: Slug 생성
+## Phase 0: Slug 생성 + 재개 감지
 
-파이프라인 시작 시 기능 요청에서 slug를 생성한다. 이후 모든 산출물은 `_workspace/{slug}/` 하위에 저장한다.
+파이프라인 시작 시 **먼저 재개 여부를 확인**한다. 이후 모든 산출물은 `_workspace/{slug}/` 하위에 저장한다.
 
-**slug 규칙:**
+### 재개 감지 (clear/compact 후 복구)
+
+```
+1. .claude/_workspace/ 하위 디렉토리 목록 확인
+2. 각 디렉토리에서 pipeline_status.md 존재 여부 확인
+3. pipeline_status.md가 있고 status가 "in_progress"인 경우:
+   - 사용자에게 진행 중인 작업 목록 제시
+   - "이어서 진행할까요?" 확인 후 해당 slug로 resume
+4. 없거나 사용자가 새 작업 선택 → 아래 slug 생성 진행
+```
+
+**resume 시**: slug 생성 스킵, 팀 재구성 후 `pipeline_status.md`의 `next_phase`부터 실행.
+
+### 새 작업 slug 규칙
+
 - 기능 요청의 핵심 키워드를 kebab-case로 변환 (예: "Timeline 필터링" → `timeline-filter`)
 - 영문 소문자 + 하이픈만 사용, 최대 30자
-- 동일 slug가 이미 존재하면 숫자 접미사 추가 (`timeline-filter-2`)
+- 동일 slug가 이미 존재하고 status가 "completed"면 숫자 접미사 추가 (`timeline-filter-2`)
+- slug 결정 후 즉시 `pipeline_status.md` 초기화 (아래 형식)
+
+### pipeline_status.md 형식
+
+```markdown
+# Pipeline Status
+slug: {slug}
+pipeline: feature-design-pipeline
+status: in_progress          # in_progress | completed | blocked
+current_phase: phase_1
+next_phase: phase_1_5
+request: "{원문}"
+updated_at: {ISO 8601}
+
+## Completed Phases
+- [ ] phase_1   — design_01~03_*.md
+- [ ] phase_1_5 — feasibility gate
+- [ ] phase_2   — design_spec.md
+- [ ] phase_2_5 — design_review.md (PASS)
+- [ ] phase_3   — 사용자 승인
+```
+
+체크박스는 각 Phase 완료 직후 `[x]`로 갱신하고 `current_phase` / `next_phase`를 업데이트한다.  
+파이프라인 정상 종료 시 `status: completed`로 변경한다.
 
 ## 팀 구성
 
@@ -79,6 +117,8 @@ TaskCreate:
 
 **격리 원칙**: 3인은 서로의 산출물을 볼 수 없다. 상충·보완은 design-synthesizer가 파일을 읽어 종합할 때 처리한다.
 
+3인 모두 완료 후 → `pipeline_status.md` 갱신: `current_phase: phase_1_5`, phase_1 체크박스 `[x]`.
+
 ### Phase 1.5: Feasibility 게이트 (오케스트레이터)
 
 3인 산출물의 `feasibility` 필드를 확인한다. synthesizer 실행 전에 반드시 이 체크를 수행한다.
@@ -101,6 +141,8 @@ TaskCreate:
   - Phase 2(synthesizer)로 진행
   - "uncertain" 항목은 synthesizer에게 "결정 필요" 태그로 전달
 ```
+
+Feasibility gate 통과 후 → `pipeline_status.md` 갱신: `current_phase: phase_2`, phase_1_5 체크박스 `[x]`.
 
 ### Phase 2: 팬인 — 종합
 
@@ -142,12 +184,15 @@ iter 2 REJECT:
 
 PASS 시에만 Phase 3(사용자 승인)로 진행한다.
 
+design_spec.md 생성 완료 → `pipeline_status.md` 갱신: `current_phase: phase_2_5`, phase_2 체크박스 `[x]`.  
+design_review.md PASS → `pipeline_status.md` 갱신: `current_phase: phase_3`, phase_2_5 체크박스 `[x]`.
+
 ### Phase 3: 사용자 승인
 
 리더가 리뷰 통과된 `design_spec.md`를 사용자에게 제시한다.
 
 - **"결정 필요" 항목**이 있으면 사용자에게 판단을 요청한다
-- 승인 시 → `agentlens-feature-pipeline`로 핸드오프 가능
+- 승인 시 → `pipeline_status.md`를 `status: completed`, phase_3 `[x]`로 갱신 → `agentlens-feature-pipeline`로 핸드오프 가능
 - 수정 요청 시 → 해당 에이전트에 TaskCreate로 재작업 지시 → Phase 2.5부터 재실행
 
 ## 작업 의존성 DAG
@@ -173,6 +218,7 @@ task_06_user_review   (leader)                 → deps: [05 PASS]
 파일 경로 규약:
 ```
 .claude/_workspace/{slug}/
+├── pipeline_status.md          (오케스트레이터, Phase 0 생성 → 각 Phase 완료 시 갱신)
 ├── design_01_requirements.md   (requirements-analyst)
 ├── design_02_impact.md         (impact-analyst)
 ├── design_03_ux_spec.md        (ux-spec-writer)
