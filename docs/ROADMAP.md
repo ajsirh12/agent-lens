@@ -17,6 +17,7 @@ actionable later without reconstructing the reasoning.
 | v0.8.0 | Turn Summary modal — Tool Usage, MCP, Hooks, Token Usage sections |
 | v0.8.1 | Subagent token breakdown in Turn Summary; OMC team agent attribution fix (`.meta.json` → OMC name mapping, `_name_to_node` lazy resolve) |
 | v0.9.0 | Activity Sparkline in status footer (8-bar events/sec histogram, `peak: N/s`, narrow-terminal suppression) |
+| v0.9.0 | Harness: 7 agents, 9 skills (incl. orchestrator), model routing (haiku/sonnet/opus + dynamic promotion), Phase 1→1.5→2→3→4 pipeline with QA retry loop (max 3) |
 | — | M-AC8-idle automated (test_idle_footer.py); M-AC11 measured at 0.16% idle CPU |
 
 ---
@@ -221,32 +222,107 @@ that moment's state.
 
 **What**: The `[flow]` mode (third `m` toggle) was added in v0.8.x.
 Currently edges connect each node to the "most recent completed
-predecessor". Two known weak points from real use:
+predecessor". Four known problems, ordered by fix priority:
 
-1. **Gap in parallel fan-out**: when 3 agents spawn simultaneously
-   from `main`, all three get edges from main — correct — but the
-   fan-out collapses visually into a vertical chain because the
-   temporal edge heuristic cannot distinguish simultaneous spawns.
-2. **Description truncation**: `description` fields > ~40 chars wrap
-   inside the node box making the DAG unreadable on small terminals.
+### P1. Parallel spawn collapses into vertical chain `[priority: 1]`
 
-### Improvement sketch
+When 3 agents spawn from `main` simultaneously, if any one of them
+completes (≥0.5s duration) before the next starts, the temporal
+heuristic treats it as a sequential predecessor:
 
-- Track `spawn_ts` on each node; edges between nodes with identical
-  `spawn_ts` within ±0.5s are rendered as true fork edges, not
-  temporal chain.
-- Truncate long `description` at 35 chars with `…` suffix, same as
-  the `[all]` mode truncation rule.
+```
+Expected:  main → A
+           main → B   (fork)
+           main → C
+
+Actual:    main → A → B → C  (chain)
+```
+
+**Root cause**: `FlowRecord` has no `spawn_ts`. The heuristic cannot
+tell whether nodes were spawned in the same assistant message or truly
+sequentially.
+
+**Fix**: Add `spawn_ts: float` to `FlowRecord`, set it to the
+assistant message timestamp at spawn time. In `_flow_subgraph()`,
+skip the "completed predecessor" lookup when `abs(rec.spawn_ts -
+candidate.spawn_ts) <= 0.5` — those nodes are simultaneous forks and
+should share the same parent directly.
+
+**Scope**: `graph_model.py` (FlowRecord + `_handle_tool_use`),
+`_flow_subgraph()` in `flowchart.py`. ~30 LOC + 4–5 tests.
+
+---
+
+### P2. Running nodes excluded from parent chain `[priority: 2]`
+
+A node only enters `completed_*` after it finishes. While A is still
+running, if A spawns B, B's parent resolves to the last completed node
+before A (e.g. `main`) instead of A:
+
+```
+Actual flow:  main → A → B   (A spawned B mid-run)
+Flow display: main → A
+              main → B        (A skipped)
+```
+
+**Root cause**: `completed_*` only contains nodes where
+`ended_ts is not None and duration >= _MIN_REAL_DURATION`.
+
+**Fix**: Introduce a third list `active: list[tuple[float, str]]`
+(started_ts, vid) that tracks currently running nodes. When finding a
+parent, prefer the deepest active ancestor over completed ones if the
+active node's `started_ts < rec.started_ts`. Clear entries from
+`active` when the node completes.
+
+**Scope**: `_flow_subgraph()` in `flowchart.py`. ~20 LOC + 3–4 tests.
+
+---
+
+### P3. Description length uncapped `[priority: 3]`
+
+`flow_label = rec.description if rec.description else rec.label`
+
+`all`/`running` modes apply `_display_label()` + `MAX_LABEL_LEN=64`.
+Flow mode uses `description` raw — long descriptions overflow node
+boxes and break terminal layout.
+
+**Fix**: Truncate `flow_label` at 35 chars with `…` suffix, matching
+the `[all]` mode truncation rule.
+
+**Scope**: One line in `_flow_subgraph()`. ~5 LOC + 1–2 tests.
+
+---
+
+### P4. turn=-1 skips filter, shows full history `[priority: 4]`
+
+```python
+if turn >= 0:   # turn=-1 (before first user_message) skips this
+    history = [r for r in history if r.turn_index == turn]
+```
+
+Before the first user message, `get_current_turn_index()` returns
+`-1` and the filter is bypassed, showing the entire `_flow_history`
+across all turns. Other modes return an empty graph at this point.
+
+**Fix**: Treat `turn < 0` as "no history yet" and return an empty
+subgraph, consistent with other modes.
+
+**Scope**: Two lines in `_flow_subgraph()`. ~5 LOC + 1 test.
+
+---
 
 ### Cost
 
-- ~1h + 3–4 tests.
-- Risk: low (layout only, no graph model changes).
+- P1: ~1.5h + 4–5 tests. Touches graph model and flowchart.
+- P2: ~1h + 3–4 tests. Flowchart only.
+- P3: ~15min + 1–2 tests. One-liner.
+- P4: ~15min + 1 test. One-liner.
+- Total: ~3h + ~12 tests.
 
 ### When to do it
 
-If flow mode is used regularly and the visual density becomes
-annoying in real sessions.
+Fix in order (P1 → P2 → P3 → P4). P1 is the most visible — skip it
+only if flow mode is never used with parallel spawns.
 
 ---
 
@@ -258,13 +334,13 @@ annoying in real sessions.
 | 2. Nested instance routing | limited until Task unlocks | 3–4h | low | medium | ⭐⭐ |
 | 3. Mermaid export | shareable snapshots | 1h | low | medium | ⭐⭐ |
 | 4. Replay slider | post-mortem debug | 3–4h | low | high | ⭐⭐ (overkill) |
-| 5. Flow-mode improvements | polish | 1h | medium | low | ⭐⭐⭐ |
+| 5. Flow-mode improvements (P1–P4) | correctness + polish | ~3h | medium | medium | ⭐⭐⭐ |
 
 ## Recommended next steps
 
 - **Minimal**: 1 only. Rest and observe after the v0.9.0 burst.
-- **Small polish**: 1 + 5. Fix flow-mode visual issues if they
-  surface during real use.
+- **Small polish**: 1 + 5. Fix flow-mode correctness issues (P1 first,
+  then P2–P4 in order).
 - **New feature**: 1 + 3. Mermaid export is cheap and useful for
   sharing session graphs in PR reviews.
 
