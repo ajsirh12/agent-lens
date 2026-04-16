@@ -118,6 +118,72 @@ that occurred during manual scrolling. 281 tests passing.
 
 ---
 
+## [0.9.5] - 2026-04-16
+
+Tab/Escape panel switching and flowchart empty-space click fix. Tab now toggles
+the active panel (timeline ↔ flowchart); Escape always returns to timeline.
+Clicking empty space in the flowchart activates the panel even without hitting a
+node. Session switch resets to timeline. 288 tests passing.
+
+### Added
+
+- **Tab key toggles active panel** — Tab cycles between Timeline and Flowchart
+  panels. Implemented by overriding `action_focus_next` (Textual routes Tab to
+  `app.focus_next` at Screen level before App.BINDINGS are reached).
+- **Escape returns to timeline** — pressing Escape always sets
+  `active_panel = "timeline"`, regardless of current state.
+- **`action_switch_panel` / `action_escape_to_timeline` actions** on
+  `AgentlensApp`.
+
+### Fixed
+
+- **Flowchart empty-space click** — `FlowchartPanel.on_click` now sets
+  `active_panel = "flowchart"` unconditionally on any click, not only when a
+  node is hit. Previously, clicking the canvas background left the panel
+  unchanged.
+- **Session switch panel reset** — switching sessions via `s` or `S` now resets
+  `active_panel` to `"timeline"` so the prior flowchart context doesn't persist
+  into the new session.
+
+### Tests
+
+- New test file `tests/test_panel_routing.py` (7 tests): Tab toggle, Escape
+  noop/restore, `action_switch_panel`, `action_escape_to_timeline`, CSS class
+  toggle, and j/k timeline cursor check. Suite: 281 → **288 passing**.
+
+---
+
+## [0.9.4] - 2026-04-16
+
+Flowchart node keyboard navigation and click coordinate precision fix.
+After clicking a node, ↑/↓/j/k navigate between nodes; ←/→/h/l also move
+prev/next. Click coordinate double-correction removed. 281 tests passing.
+
+### Added
+
+- **Flowchart node keyboard navigation** — clicking a flowchart node sets it as
+  the keyboard cursor; subsequent ↑/↓/j/k move to the previous/next node in
+  visual order (sorted by `(row, col)`). ←/→/h/l are also mapped as prev/next.
+  Wraps at list boundaries.
+- **`FlowchartPanel.move_node_cursor(direction)`** — public method called by
+  `AgentlensApp.action_cursor_*`. Handles empty/single-node edge cases, never
+  raises.
+- **`FlowchartPanel._sorted_navigable_nids()`** — returns layout-sorted nids
+  excluding ROOT_ID.
+- **`FlowchartPanel.select_node_by_nid(nid)`** — sets selection and updates
+  `app.selected_agent_id`.
+- **left/right/h/l BINDINGS** in `AgentlensApp` mapped to `cursor_left` /
+  `cursor_right`.
+
+### Fixed
+
+- **Flowchart click coordinate double-correction** — `on_click` was adding
+  `scroll_x / scroll_y` to `event.x / event.y`, but Textual's
+  `Screen._forward_event` already applies `_apply_offset` when dispatching to
+  child widgets. Removing the addition fixes node hit detection after scrolling.
+
+---
+
 ## [0.8.1] - 2026-04-14
 
 Subagent token breakdown in Turn Summary, OMC team agent attribution fix,
