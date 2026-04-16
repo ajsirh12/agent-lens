@@ -55,6 +55,7 @@ class TimelinePanel(Container):
         table: DataTable[Any] = DataTable(id="timeline-table")
         table.cursor_type = "row"
         table.zebra_stripes = True
+        table.can_focus = False
         self._table = table
         yield table
 
