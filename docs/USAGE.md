@@ -1,4 +1,4 @@
-# agentlens 사용 가이드 (v0.8.1)
+# agentlens 사용 가이드 (v0.9.3)
 
 Claude Code 세션 JSONL 을 실시간 tail 해서 **Timeline + 라이브 Flowchart** 두 패널로
 보여주는 Python + Textual TUI. 서브에이전트 호출, 스킬 호출, 병렬 spawn 까지 그래프로
@@ -87,8 +87,8 @@ agentlens
 | Key | Action |
 |---|---|
 | `q` | 종료 |
-| `j` / `↓` | Timeline 커서 아래로 |
-| `k` / `↑` | Timeline 커서 위로 |
+| `j` / `↓` | **활성 패널** 기준 — Flowchart 활성: 캔버스 아래 스크롤 / Timeline 활성: 커서 아래로 |
+| `k` / `↑` | **활성 패널** 기준 — Flowchart 활성: 캔버스 위 스크롤 / Timeline 활성: 커서 위로 |
 | `Enter` | **Turn Summary 모달** — turn marker 에서 Agents/Skills + Tool Usage + MCP + Hooks 요약 표시. Timeline row 선택 시 상세 모달 (tool name / input / status / duration) |
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
 | `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
@@ -321,6 +321,20 @@ Hooks
 5. `Esc` 로 닫기
 
 Single-spawn 이거나 clicked instance 정보가 없으면 node 레벨의 가장 최근 subagent 파일로 fallback.
+
+### Panel Focus Routing (v0.9.3+)
+
+`j`/`k`/`↑`/`↓` 키의 동작은 **마지막으로 클릭한 패널**에 따라 달라집니다.
+
+| 활성 패널 | `↓` / `j` | `↑` / `k` |
+|---|---|---|
+| **Flowchart** (기본값) | flowchart 캔버스 아래 스크롤 | flowchart 캔버스 위 스크롤 |
+| **Timeline** | Timeline DataTable 커서 아래로 | Timeline DataTable 커서 위로 |
+
+- 앱 시작 시 기본 활성 패널은 **Flowchart** 입니다.
+- 패널을 클릭하면 해당 패널이 활성화되고 **초록 border** 가 표시됩니다.
+- Timeline 커서를 움직이려면 먼저 Timeline 패널을 클릭하세요.
+- Flowchart 를 스크롤하려면 Flowchart 패널을 클릭하거나 앱을 새로 시작하면 됩니다.
 
 ### Cross-highlight
 

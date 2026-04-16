@@ -65,6 +65,7 @@ class AgentlensApp(App[int]):
     selected_agent_id: reactive[str | None] = reactive(None)
     selected_event_id: reactive[str | None] = reactive(None)
     last_event_monotonic: reactive[float] = reactive(0.0)
+    active_panel: reactive[str] = reactive("timeline")
 
     def __init__(
         self,
@@ -292,6 +293,12 @@ class AgentlensApp(App[int]):
             f"{self._flowchart_counts_suffix()}"
         )
         self._footer.update(f"{base}{self._activity_suffix(base)}")
+
+    def watch_active_panel(self, new_val: str) -> None:
+        if self._timeline:
+            self._timeline.set_class(new_val == "timeline", "panel-active")
+        if self._flowchart:
+            self._flowchart.set_class(new_val == "flowchart", "panel-active")
 
     # --- message routing -------------------------------------------------
 

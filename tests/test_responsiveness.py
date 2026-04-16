@@ -38,6 +38,8 @@ async def test_keypress_repaint_under_200ms(tmp_path: Path) -> None:
             )
         await pilot.pause()
 
+        # Activate timeline panel so j routes to DataTable cursor (not flowchart scroll).
+        app.active_panel = "timeline"
         t0 = time.monotonic()
         await pilot.press("j")
         await pilot.pause()

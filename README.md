@@ -84,6 +84,10 @@ nested subagent trees and parallel-instance views.
   spans list their sub-agents with 4-space indentation; standalone agents
   appear under a separate `agents (N)` section. Double-counting is
   prevented — `Total` is the leaf sum only.
+- **Panel focus-based key routing** — clicking the Flowchart panel routes
+  `↑`/`↓`/`j`/`k` to canvas scroll; clicking the Timeline panel routes them to
+  DataTable cursor movement. Default at startup is Flowchart. Active panel is
+  highlighted with a green border.
 - **Activity Sparkline** in the status footer: a rolling 8-bar histogram of
   events/sec over the last 60 seconds using block characters (▁▂▃▄▅▆▇█),
   with a `peak: N/s` label. Auto-suppressed on narrow terminals.
@@ -183,7 +187,7 @@ tell agentlens which directory to compute the slug from.
 ## Tests
 
 ```bash
-pytest -q           # 269 tests
+pytest -q           # 281 tests
 ```
 
 ## Manual Verification
@@ -222,9 +226,8 @@ polling loop or set_interval rate is ever changed.
 
 ## Status
 
-v0.9.0 — Activity Sparkline in status footer. The footer now shows a
-rolling 8-bar histogram of events/sec over the last 60 seconds using
-Unicode block characters (▁▂▃▄▅▆▇█), with a `peak: N/s` label. Auto-
-suppressed on narrow terminals. 269 tests passing.
+v0.9.3 — Panel focus-based key routing. Clicking a panel routes `↑`/`↓`/`j`/`k`
+to that panel (flowchart scroll or timeline cursor). Active panel shown with a
+green border. Also fixes two timeline cursor snap-to-bottom bugs. 281 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

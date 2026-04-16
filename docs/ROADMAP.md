@@ -19,6 +19,7 @@ actionable later without reconstructing the reasoning.
 | v0.9.0 | Activity Sparkline in status footer (8-bar events/sec histogram, `peak: N/s`, narrow-terminal suppression) |
 | v0.9.0 | Harness: 7 agents, 9 skills (incl. orchestrator), model routing (haiku/sonnet/opus + dynamic promotion), Phase 1→1.5→2→3→4 pipeline with QA retry loop (max 3) |
 | v0.9.2 | Nested spawn FlowRecord + tree topology (nested children now appear under parent node in flow mode) |
+| v0.9.3 | Panel focus-based key routing (`↑`/`↓`/`j`/`k` routed to active panel); active panel green border; timeline cursor snap-to-bottom bug fix (`_highlight_from_timeline` flag + `_do_scroll_to_end` guard) |
 | — | M-AC8-idle automated (test_idle_footer.py); M-AC11 measured at 0.16% idle CPU |
 
 ---

@@ -48,6 +48,8 @@ async def test_forward_timeline_cursor_to_app_reactive(tmp_path: Path) -> None:
         timeline.add_event(_tool("agent-B", 1))
         await pilot.pause()
 
+        # Activate timeline panel so j/k route to the DataTable cursor.
+        app.active_panel = "timeline"
         # Move cursor down once (onto row 1 = agent-B).
         await pilot.press("j")
         await pilot.pause()

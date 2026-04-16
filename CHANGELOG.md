@@ -76,6 +76,44 @@ tests passing.
 
 ---
 
+## [0.9.3] - 2026-04-16
+
+Panel focus-based key routing. Clicking a panel now routes `↑`/`↓`/`j`/`k` to
+that panel: flowchart canvas scroll when the Flowchart panel is active (default),
+timeline row cursor movement when the Timeline panel is active. Active panel is
+indicated with a green border. Also fixes two timeline cursor snap-to-bottom bugs
+that occurred during manual scrolling. 281 tests passing.
+
+### Added
+
+- **Panel focus-based key routing** — clicking the Flowchart panel routes
+  `↑`/`↓`/`j`/`k` to flowchart canvas scroll; clicking the Timeline panel routes
+  the same keys to DataTable cursor movement. Default at startup is Flowchart
+  (scroll). Implemented via `active_panel: reactive[str]` on `AgentlensApp`.
+- **Active panel green border** — the currently active panel displays a
+  `border: solid $success` outline (CSS class `panel-active`, toggled by
+  `watch_active_panel`). Both panels are covered: `#timeline.panel-active`
+  and `#flowchart.panel-active`.
+
+### Fixed
+
+- **Timeline cursor snap-to-bottom during manual scroll** — introduced
+  `_highlight_from_timeline` flag in `TimelinePanel` to suppress
+  `_on_app_agent_changed` from re-triggering auto-scroll while the user is
+  manually scrolling through the table. The flag is safely restored on exception.
+- **`_do_scroll_to_end` cursor guard** — `_do_scroll_to_end` now checks the
+  `_highlight_from_timeline` flag before moving the cursor, preventing
+  cross-highlight events from snapping the view back to the bottom mid-scroll.
+
+### Changed
+
+- **Default key routing changed** — `↑`/`↓`/`j`/`k` now scroll the Flowchart
+  canvas by default (app start). To move the Timeline cursor, click the Timeline
+  panel first. This is a behavior change from v0.9.2, where these keys always
+  moved the Timeline cursor.
+
+---
+
 ## [Unreleased]
 
 ---

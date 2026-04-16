@@ -48,6 +48,12 @@ class TimelinePanel(Container):
         # next refresh tick instead of 500 redundant move_cursor calls.
         self._scroll_pending = False
         self._turn_counter: int = 0
+        # When the timeline itself changes selected_agent_id (because the
+        # user highlighted a row), we must NOT let _on_app_agent_changed
+        # jump the cursor to the most-recent row for that agent — that
+        # would fight the user's manual scroll. This flag persists across
+        # the async watcher boundary.
+        self._highlight_from_timeline: bool = False
 
     def compose(self) -> ComposeResult:
         self._placeholder = Static("waiting for events…", classes="placeholder")
@@ -285,12 +291,22 @@ class TimelinePanel(Container):
         """Deferred callback that actually moves the cursor. Guarded
         with ``_updating`` so the resulting row-highlighted event does
         not recurse into the cross-highlight path.
+
+        Re-checks cursor position at callback time: if the user has
+        scrolled more than one row away from the tail since the callback
+        was scheduled, their intent takes priority and we skip the jump.
         """
         self._scroll_pending = False
         if self._table is None:
             return
         total = self._row_count
         if total == 0:
+            return
+        # Guard against overriding a manual scroll. If the user moved the
+        # cursor more than 1 row above the last row between when
+        # _scroll_to_end() was called and now, skip the jump.
+        cursor = self._table.cursor_row
+        if cursor is not None and cursor >= 0 and cursor < total - 1:
             return
         self._updating = True
         try:
@@ -312,12 +328,22 @@ class TimelinePanel(Container):
         aid = self._row_agent.get(row_key)
         if aid is None:
             return
+        # Mark that this agent change originated from the timeline so that
+        # _on_app_agent_changed does NOT jump the cursor back to the
+        # most-recent row — that would fight the user's manual scroll.
+        self._highlight_from_timeline = True
         try:
             self.app.selected_agent_id = aid  # type: ignore[attr-defined]
         except Exception:
-            pass
+            self._highlight_from_timeline = False
 
     def _on_app_agent_changed(self, new_value: str | None) -> None:
+        # If the change was initiated by the timeline itself (user scrolled),
+        # skip the reverse cursor-jump — the flowchart will still highlight
+        # the matching node, but the timeline stays where the user put it.
+        if self._highlight_from_timeline:
+            self._highlight_from_timeline = False
+            return
         if self._updating or self._table is None or new_value is None:
             return
         # Find the most recent row with matching agent_id.
@@ -336,6 +362,20 @@ class TimelinePanel(Container):
             pass
         finally:
             self._updating = False
+
+    # --- click handling --------------------------------------------------
+
+    def on_click(self, event: Any) -> None:  # noqa: ANN001
+        """Switch app active_panel to 'timeline' when this panel is clicked.
+
+        DataTable.can_focus is False, so clicks bubble up to this Container
+        via Textual's event bubbling. try/except guards against app context
+        being absent (e.g. standalone test instantiation).
+        """
+        try:
+            self.app.active_panel = "timeline"  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
     # --- public API (used by app.py) -------------------------------------
 
@@ -407,6 +447,7 @@ class TimelinePanel(Container):
         self._row_count = 0
         self._scroll_pending = False
         self._turn_counter = 0
+        self._highlight_from_timeline = False
         if self._table is None:
             return
         try:

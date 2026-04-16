@@ -92,7 +92,7 @@ class FlowchartPanel(ScrollableContainer):
 
     DEFAULT_CSS = ""
 
-    can_focus = True
+    can_focus = False
 
     def __init__(
         self,
@@ -612,6 +612,8 @@ class FlowchartPanel(ScrollableContainer):
                         self._selected_flow_vid = None
                     else:
                         self._selected_flow_vid = None
+                    # Switch app focus to flowchart panel.
+                    self.app.active_panel = "flowchart"  # type: ignore[attr-defined]
                 except Exception:
                     pass
                 finally:
