@@ -581,6 +581,11 @@ class FlowchartPanel(ScrollableContainer):
     def on_click(self, event: Any) -> None:
         if self._updating:
             return
+        # Any click on the flowchart panel activates it — even empty space.
+        try:
+            self.app.active_panel = "flowchart"  # type: ignore[attr-defined]
+        except Exception:
+            pass
         # Convert click coordinates to a (row, col) within our canvas.
         # FlowchartPanel is a ScrollableContainer. Textual dispatches the
         # click event to the innermost child (the Static #flowchart-canvas)
@@ -616,8 +621,6 @@ class FlowchartPanel(ScrollableContainer):
                     else:
                         self._selected_flow_vid = None
                     self._selected_nid = nid
-                    # Switch app focus to flowchart panel.
-                    self.app.active_panel = "flowchart"  # type: ignore[attr-defined]
                 except Exception:
                     pass
                 finally:

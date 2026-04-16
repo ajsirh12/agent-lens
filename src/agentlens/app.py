@@ -64,6 +64,7 @@ class AgentlensApp(App[int]):
         ("[", "prev_turn", "Prev turn"),
         ("]", "next_turn", "Next turn"),
         ("\\", "live_turn", "LIVE turn"),
+        ("escape", "escape_to_timeline", "Back to timeline"),
     ]
 
     selected_agent_id: reactive[str | None] = reactive(None)
@@ -338,6 +339,19 @@ class AgentlensApp(App[int]):
         if self.active_panel == "flowchart" and self._flowchart is not None:
             self._flowchart.move_node_cursor("up")
 
+    def action_focus_next(self) -> None:
+        """Override Tab: toggle active panel instead of cycling focus."""
+        self.action_switch_panel()
+
+    def action_switch_panel(self) -> None:
+        if self.active_panel == "timeline":
+            self.active_panel = "flowchart"
+        else:
+            self.active_panel = "timeline"
+
+    def action_escape_to_timeline(self) -> None:
+        self.active_panel = "timeline"
+
     def action_show_detail(self) -> None:
         if self._timeline is None:
             return
@@ -536,6 +550,7 @@ class AgentlensApp(App[int]):
             self.last_event_monotonic = 0.0
             self._activity = ActivityRate()
             self.selected_agent_id = None
+            self.active_panel = "timeline"
             self._active_turn = None
             self._start_session_workers(chosen)
             self._update_footer()
@@ -569,6 +584,7 @@ class AgentlensApp(App[int]):
             self.last_event_monotonic = 0.0
             self._activity = ActivityRate()
             self.selected_agent_id = None
+            self.active_panel = "timeline"
             self._active_turn = None
             self._start_session_workers(chosen)
             self._update_footer()
