@@ -39,6 +39,10 @@ class AgentlensApp(App[int]):
         ("k", "cursor_up", "Up"),
         ("down", "cursor_down", "Down"),
         ("up", "cursor_up", "Up"),
+        ("left",  "cursor_left",  "←"),
+        ("right", "cursor_right", "→"),
+        ("h",     "cursor_left",  "←"),
+        ("l",     "cursor_right", "→"),
         ("enter", "show_detail", "Detail"),
         ("d", "drill_down", "Subagent detail"),
         ("m", "toggle_mode", "Mode: All/Running"),
@@ -315,12 +319,24 @@ class AgentlensApp(App[int]):
     # --- actions ---------------------------------------------------------
 
     def action_cursor_down(self) -> None:
-        if self._timeline is not None:
+        if self.active_panel == "flowchart" and self._flowchart is not None:
+            self._flowchart.move_node_cursor("down")
+        elif self._timeline is not None:
             self._timeline.move_cursor("down")
 
     def action_cursor_up(self) -> None:
-        if self._timeline is not None:
+        if self.active_panel == "flowchart" and self._flowchart is not None:
+            self._flowchart.move_node_cursor("up")
+        elif self._timeline is not None:
             self._timeline.move_cursor("up")
+
+    def action_cursor_right(self) -> None:
+        if self.active_panel == "flowchart" and self._flowchart is not None:
+            self._flowchart.move_node_cursor("down")
+
+    def action_cursor_left(self) -> None:
+        if self.active_panel == "flowchart" and self._flowchart is not None:
+            self._flowchart.move_node_cursor("up")
 
     def action_show_detail(self) -> None:
         if self._timeline is None:

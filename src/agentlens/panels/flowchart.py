@@ -108,6 +108,7 @@ class FlowchartPanel(ScrollableContainer):
         self._virtual_to_tid: dict[str, str] = {}
         self._selected_tool_use_id: str | None = None
         self._selected_flow_vid: str | None = None
+        self._selected_nid: str | None = None  # keyboard nav current nid
         self._active_turn: int | None = None
         self._layout: LayoutResult = self._compute_layout()
         self._canvas: Static | None = None
@@ -140,6 +141,7 @@ class FlowchartPanel(ScrollableContainer):
         self._virtual_to_tid = {}
         self._selected_tool_use_id = None
         self._selected_flow_vid = None
+        self._selected_nid = None
         self._active_turn = None
         self._layout = self._compute_layout()
         self._refresh_canvas()
@@ -580,13 +582,14 @@ class FlowchartPanel(ScrollableContainer):
         if self._updating:
             return
         # Convert click coordinates to a (row, col) within our canvas.
-        # FlowchartPanel is a ScrollableContainer, so event.x/y are
-        # relative to the VISIBLE viewport. The layout node positions
-        # are in absolute canvas coordinates. We must add the scroll
-        # offset so a click after scrolling still hits the right node.
+        # FlowchartPanel is a ScrollableContainer. Textual dispatches the
+        # click event to the innermost child (the Static #flowchart-canvas)
+        # with coordinates already transformed to content space — the
+        # scroll offset is baked in by _forward_event. Adding scroll_x/y
+        # here would double-correct and shift hits by the scroll amount.
         try:
-            x = int(getattr(event, "x", 0)) + int(self.scroll_x)
-            y = int(getattr(event, "y", 0)) + int(self.scroll_y)
+            x = int(getattr(event, "x", 0))
+            y = int(getattr(event, "y", 0))
         except Exception:
             return
         for nid, pos in self._layout.nodes.items():
@@ -612,6 +615,7 @@ class FlowchartPanel(ScrollableContainer):
                         self._selected_flow_vid = None
                     else:
                         self._selected_flow_vid = None
+                    self._selected_nid = nid
                     # Switch app focus to flowchart panel.
                     self.app.active_panel = "flowchart"  # type: ignore[attr-defined]
                 except Exception:
@@ -620,6 +624,60 @@ class FlowchartPanel(ScrollableContainer):
                     self._updating = False
                 self._refresh_canvas()
                 return
+
+    # ------------------------------------------------------------------
+    def _sorted_navigable_nids(self) -> list[str]:
+        """Return layout-coordinate-sorted nids, ROOT excluded."""
+        from ..graph_model import ROOT_ID
+        items = [
+            (nid, pos) for nid, pos in self._layout.nodes.items()
+            if self._base_node_id(nid) != ROOT_ID
+        ]
+        items.sort(key=lambda kv: (kv[1].row, kv[1].col))
+        return [nid for nid, _ in items]
+
+    def select_node_by_nid(self, nid: str) -> None:
+        """Select a node and update app.selected_agent_id."""
+        try:
+            base = self._base_node_id(nid)
+            self._selected_nid = nid
+            self._selected_flow_vid = nid if "@" in nid else None
+            self._selected_tool_use_id = self._virtual_to_tid.get(nid)
+            self.app.selected_agent_id = base  # type: ignore[attr-defined]
+            self._refresh_canvas()
+        except Exception:
+            pass
+
+    def move_node_cursor(self, direction: str) -> None:
+        """Move selection to prev ('up') or next ('down') node in layout order."""
+        try:
+            ordered = self._sorted_navigable_nids()
+            if not ordered:
+                return
+            if len(ordered) == 1:
+                self.select_node_by_nid(ordered[0])
+                return
+            current_agent = None
+            try:
+                current_agent = self.app.selected_agent_id  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            idx = -1
+            if current_agent is not None:
+                for i, nid in enumerate(ordered):
+                    if self._base_node_id(nid) == current_agent:
+                        idx = i
+                        break
+            if idx < 0:
+                self.select_node_by_nid(ordered[0])
+                return
+            if direction == "down":
+                next_idx = (idx + 1) % len(ordered)
+            else:
+                next_idx = (idx - 1) % len(ordered)
+            self.select_node_by_nid(ordered[next_idx])
+        except Exception:
+            pass
 
     def _on_app_agent_changed(self, new_value: str | None) -> None:
         if self._updating:
