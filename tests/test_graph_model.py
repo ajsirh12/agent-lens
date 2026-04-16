@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from agentlens.events import EventType, HarnessEvent
-from agentlens.graph_model import MAX_NODES, ROOT_ID, CallGraph
+from agentlens.graph_model import MAX_NODES, MAX_TOOL_EVENTS, ROOT_ID, CallGraph
 
 
 def _task_use(subagent: str, *, parent: str | None = None, tid: str = "t1") -> HarnessEvent:
@@ -817,3 +817,166 @@ def test_t_c8_subagent_type_still_works_for_native_agents() -> None:
     assert "agent:general-purpose" in g.nodes
     # _name_to_node should not be populated (no input.name field).
     assert g._name_to_node == {}
+
+
+# ---------------------------------------------------------------------------
+# Tool events timeline (turn-summary-timeline feature)
+# ---------------------------------------------------------------------------
+
+def _tool_use_event(
+    tool_name: str = "Bash",
+    tid: str = "tid1",
+    agent_id: str | None = None,
+    ts: datetime | None = None,
+) -> HarnessEvent:
+    return HarnessEvent(
+        type=EventType.tool_use,
+        ts=ts or datetime.now(timezone.utc),
+        agent_id=agent_id,
+        payload={"tool_name": tool_name, "tool_use_id": tid, "input": {"command": "ls"}},
+    )
+
+
+def _tool_result_event(
+    tid: str = "tid1",
+    error: bool = False,
+    ts: datetime | None = None,
+) -> HarnessEvent:
+    return HarnessEvent(
+        type=EventType.tool_result,
+        ts=ts or datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_use_id": tid, "is_error": error},
+    )
+
+
+def test_tool_events_populated_on_tool_use() -> None:
+    """tool_use event for a regular tool adds an entry to TurnRecord.tool_events."""
+    g = CallGraph()
+    g.update_from_event(_user_message())  # turn 0
+    g.update_from_event(_tool_use_event("Read", tid="r1"))
+
+    turns = g.get_turns()
+    assert len(turns) > 0
+    turn = turns[0]
+    assert len(turn.tool_events) == 1
+    evt = turn.tool_events[0]
+    assert evt["name"] == "Read"
+    assert evt["tool_use_id"] == "r1"
+    assert evt["status"] == "running"
+    assert evt["duration_ms"] is None
+    assert evt["ts"] > 0
+
+
+def test_tool_events_updated_on_tool_result() -> None:
+    """Matching tool_result updates status to 'done' and computes duration_ms."""
+    from datetime import timedelta
+
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    t_start = datetime.now(timezone.utc)
+    t_end = t_start + timedelta(milliseconds=500)
+
+    g.update_from_event(_tool_use_event("Bash", tid="b1", ts=t_start))
+    g.update_from_event(_tool_result_event("b1", ts=t_end))
+
+    turn = g.get_turns()[0]
+    evt = turn.tool_events[0]
+    assert evt["status"] == "done"
+    assert evt["duration_ms"] is not None
+    assert 400 <= evt["duration_ms"] <= 600  # ~500ms with float precision
+
+
+def test_tool_events_error_status() -> None:
+    """tool_result with is_error=True sets status to 'error'."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_tool_use_event("Bash", tid="e1"))
+    g.update_from_event(_tool_result_event("e1", error=True))
+
+    turn = g.get_turns()[0]
+    assert turn.tool_events[0]["status"] == "error"
+
+
+def test_tool_events_cap_enforced() -> None:
+    """201st tool_use event is rejected; tool_events length stays at MAX_TOOL_EVENTS."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    for i in range(MAX_TOOL_EVENTS + 1):
+        g.update_from_event(_tool_use_event("Bash", tid=f"cap-{i}"))
+
+    turn = g.get_turns()[0]
+    assert len(turn.tool_events) == MAX_TOOL_EVENTS
+
+
+def test_tool_events_agent_task_skill_excluded() -> None:
+    """Agent, Task, and Skill tool_use events are NOT added to tool_events."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    g.update_from_event(_agent_use("planner", tid="a1"))
+    g.update_from_event(_task_use("executor", tid="t1"))
+    g.update_from_event(_skill_use("ralplan", tid="s1"))
+
+    turn = g.get_turns()[0]
+    assert len(turn.tool_events) == 0
+
+
+def test_tool_events_mcp_included() -> None:
+    """MCP tool_use events ARE included in tool_events."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    mcp_ev = HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={
+            "tool_name": "mcp__context7__get-docs",
+            "tool_use_id": "mcp1",
+            "is_mcp": True,
+            "input": {},
+        },
+    )
+    g.update_from_event(mcp_ev)
+
+    turn = g.get_turns()[0]
+    assert len(turn.tool_events) == 1
+    assert turn.tool_events[0]["name"] == "mcp__context7__get-docs"
+
+
+def test_tool_timeline_in_get_turn_summary() -> None:
+    """get_turn_summary() includes tool_timeline key, sorted by timestamp."""
+    from datetime import timedelta
+
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    t0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    t1 = t0 + timedelta(seconds=1)
+    t2 = t0 + timedelta(seconds=2)
+
+    # Insert in non-chronological order to verify sorting
+    g.update_from_event(_tool_use_event("Edit", tid="e1", ts=t2))
+    g.update_from_event(_tool_use_event("Read", tid="r1", ts=t0))
+    g.update_from_event(_tool_use_event("Bash", tid="b1", ts=t1))
+
+    s = g.get_turn_summary(0)
+    assert "tool_timeline" in s
+    tl = s["tool_timeline"]
+    assert len(tl) == 3
+    # Verify chronological ordering
+    assert tl[0]["name"] == "Read"
+    assert tl[1]["name"] == "Bash"
+    assert tl[2]["name"] == "Edit"
+    assert tl[0]["ts"] <= tl[1]["ts"] <= tl[2]["ts"]
+
+
+def test_tool_timeline_fallback() -> None:
+    """get_turn_summary() for nonexistent turn returns tool_timeline: []."""
+    g = CallGraph()
+    s = g.get_turn_summary(999)
+    assert "tool_timeline" in s
+    assert s["tool_timeline"] == []

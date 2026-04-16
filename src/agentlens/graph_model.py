@@ -79,6 +79,15 @@ class TurnRecord:
     # Flat bucket for agents spawned outside any skill span.
     # key = agent_node_id, value = {"label": str, "tokens": {...}}
     token_agents_standalone: dict = field(default_factory=dict)
+    # Per-turn individual tool events for timeline display (capped at
+    # MAX_TOOL_EVENTS). Each entry:
+    #   {"ts": float, "name": str, "agent_id": str, "tool_use_id": str,
+    #    "status": "running"|"done"|"error", "duration_ms": int|None}
+    # Populated by _handle_tool_use / _handle_tool_result.
+    tool_events: list[dict] = field(default_factory=list)
+    # Lookup index: tool_use_id -> index in tool_events list.
+    # Enables O(1) tool_result -> tool_use matching for duration update.
+    _tool_event_index: dict[str, int] = field(default_factory=dict)
 
 ROOT_ID = "main"
 
@@ -134,6 +143,10 @@ MAX_BREAKDOWN_TOOLS = 20
 # Per-turn cap on raw hookInfos snapshot retention. Mirrors parser.MAX_HOOK_INFOS
 # so a single turn can never retain an unbounded number of hook entries.
 MAX_HOOK_INFOS = 50
+
+# Per-turn cap on individual tool event entries for timeline display.
+# Bounds memory growth from high-frequency tool turns.
+MAX_TOOL_EVENTS = 200
 
 
 # Text patterns Claude Code injects into user rows that LOOK like user
@@ -427,6 +440,24 @@ class CallGraph:
                     self._bump_capped(
                         turn.tool_calls, tool, turn.tool_overflow_names
                     )
+                # --- tool_events timeline tracking ---
+                if tool not in ("Agent", "Task", "Skill"):
+                    tid_evt = ev.tool_use_id
+                    if tid_evt and len(turn.tool_events) < MAX_TOOL_EVENTS:
+                        ts_epoch_evt = (
+                            ev.ts.timestamp() if ev.ts is not None else 0.0
+                        )
+                        turn.tool_events.append({
+                            "ts": ts_epoch_evt,
+                            "name": tool,
+                            "agent_id": str(ev.agent_id or ""),
+                            "tool_use_id": tid_evt,
+                            "status": "running",
+                            "duration_ms": None,
+                        })
+                        turn._tool_event_index[tid_evt] = (
+                            len(turn.tool_events) - 1
+                        )
         # === end per-turn attribution ===
 
         # Claude Code historically used "Task" for subagent spawns; the
@@ -578,6 +609,30 @@ class CallGraph:
         tid = ev.tool_use_id
         if not tid:
             return False
+
+        # --- tool_events timeline: update status/duration ---
+        if self._current_turn_index >= 0:
+            try:
+                turn = self._turns[self._current_turn_index]
+            except IndexError:
+                turn = None
+            if turn is not None:
+                evt_idx = turn._tool_event_index.get(tid)
+                if evt_idx is not None and evt_idx < len(turn.tool_events):
+                    evt = turn.tool_events[evt_idx]
+                    if evt.get("status") == "running":
+                        is_error = bool(ev.payload.get("is_error", False))
+                        evt["status"] = "error" if is_error else "done"
+                        ts_epoch_res = (
+                            ev.ts.timestamp() if ev.ts is not None else 0.0
+                        )
+                        start_ts = evt.get("ts", 0.0)
+                        if ts_epoch_res > start_ts > 0:
+                            evt["duration_ms"] = int(
+                                (ts_epoch_res - start_ts) * 1000
+                            )
+        # --- end tool_events timeline ---
+
         node_id = self._tool_use_to_node.get(tid)
         if not node_id:
             return False
@@ -1241,6 +1296,14 @@ class CallGraph:
                     ]
                     if turn is not None else []
                 ),
+                # Tool event timeline (per-event, chronological)
+                "tool_timeline": (
+                    sorted(
+                        [dict(e) for e in turn.tool_events],
+                        key=lambda e: e.get("ts", 0.0),
+                    )
+                    if turn is not None else []
+                ),
             }
         except Exception:
             return {
@@ -1280,6 +1343,7 @@ class CallGraph:
                 "token_nodes": [],
                 "token_skill_tree": [],
                 "token_agents_standalone": [],
+                "tool_timeline": [],
             }
 
     # ------------------------------------------------------------------

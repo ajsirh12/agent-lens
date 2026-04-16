@@ -11,9 +11,9 @@ import os
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import ScrollableContainer, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Static
+from textual.widgets import DataTable, Static
 
 _TOP_N_TOOL = 8
 _TOP_N_MCP = 6
@@ -21,6 +21,7 @@ _TOP_N_HOOK = 5
 _TOP_N_SKILL = 5
 _TOP_N_AGENT = 8
 _TOP_N_TOKEN = 10  # legacy token_nodes fallback
+_TOP_N_TIMELINE = 200  # max rows in the tool timeline DataTable
 
 
 def _sanitize(s: object) -> str:
@@ -357,6 +358,21 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
 class TurnSummaryScreen(ModalScreen[None]):
     """Modal showing a summary of a single turn's orchestration."""
 
+    DEFAULT_CSS = """
+    #turn-summary-scroll {
+        width: 80;
+        max-width: 95%;
+        max-height: 85%;
+        border: thick $accent;
+        background: $panel;
+        padding: 1 2;
+    }
+    #turn-tool-timeline {
+        max-height: 15;
+        margin-top: 1;
+    }
+    """
+
     BINDINGS = [("escape", "dismiss", "Close"), ("enter", "dismiss", "Close")]
 
     def __init__(self, summary: dict[str, Any]) -> None:
@@ -365,12 +381,55 @@ class TurnSummaryScreen(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         lines = _build_lines(self.summary)
-        with Vertical(id="turn-summary-body"):
-            for line in lines:
-                if line == "(no agent or skill invocations)" or line == "(Esc / Enter to close)":
-                    yield Static(line, classes="placeholder")
-                else:
-                    yield Static(line)
+        tool_timeline = self.summary.get("tool_timeline", []) or []
+
+        with ScrollableContainer(id="turn-summary-scroll"):
+            with Vertical(id="turn-summary-body"):
+                for line in lines:
+                    if line in (
+                        "(no agent or skill invocations)",
+                        "(Esc / Enter to close)",
+                    ):
+                        yield Static(line, classes="placeholder")
+                    else:
+                        yield Static(line)
+
+            # --- Tool Timeline DataTable ---
+            if tool_timeline:
+                yield Static(
+                    f"[bold]Tool Calls ({len(tool_timeline)} events)[/bold]"
+                )
+                table = DataTable(id="turn-tool-timeline")
+                table.add_columns("time", "tool", "agent", "sts", "dur")
+                table.cursor_type = "row"
+                table.zebra_stripes = True
+                for evt in tool_timeline[:_TOP_N_TIMELINE]:
+                    try:
+                        ts = evt.get("ts", 0.0)
+                        from datetime import datetime, timezone
+                        time_str = datetime.fromtimestamp(
+                            ts, tz=timezone.utc
+                        ).strftime("%H:%M:%S")
+                    except Exception:
+                        time_str = "-"
+                    name = _trunc(str(evt.get("name", "")), 14)
+                    agent = _trunc(str(evt.get("agent_id", "") or "-"), 16)
+                    status = evt.get("status", "")
+                    if status == "done":
+                        sts = "ok"
+                    elif status == "error":
+                        sts = "err"
+                    elif status == "running":
+                        sts = "run"
+                    else:
+                        sts = str(status)[:3]
+                    dur_ms = evt.get("duration_ms")
+                    dur = _fmt_ms(dur_ms) if dur_ms is not None else "-"
+                    table.add_row(time_str, name, agent, sts, dur)
+                overflow = len(tool_timeline) - _TOP_N_TIMELINE
+                if overflow > 0:
+                    table.add_row("", f"... +{overflow} more", "", "", "")
+                yield table
 
     def action_dismiss(self) -> None:  # type: ignore[override]
         self.dismiss(None)

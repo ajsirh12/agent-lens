@@ -118,6 +118,32 @@ that occurred during manual scrolling. 281 tests passing.
 
 ---
 
+## [0.9.6] - 2026-04-16
+
+Turn Summary mini timeline. Pressing Enter on a turn now shows individual tool
+call events below the Token Usage section — a scrollable DataTable with time,
+tool, agent, status, and duration columns. Up to 200 events tracked per turn.
+
+### Added
+
+- **Turn Summary mini timeline** — `TurnSummaryScreen` now renders a per-turn
+  tool call timeline below the Token Usage section. Each row shows timestamp
+  (HH:MM:SS UTC), tool name (14-char truncate), agent ID (16-char truncate),
+  status (ok/err/run), and duration. The DataTable is zebra-striped,
+  row-cursor, max 15 visible rows with internal scroll. Section is omitted
+  when no tool events exist for the turn.
+- **`TurnRecord.tool_events` field** — per-turn list of individual tool event
+  dicts (`{ts, name, agent_id, tool_use_id, status, duration_ms}`). Populated
+  by `_handle_tool_use` / `_handle_tool_result` with O(1) matching via
+  `_tool_event_index`. Backward-compatible (`field(default_factory=list)`).
+- **`MAX_TOOL_EVENTS = 200` constant** — caps per-turn tool event entries to
+  bound memory, following the same pattern as `MAX_BREAKDOWN_TOOLS` and
+  `MAX_HOOK_INFOS`.
+- **`get_turn_summary()["tool_timeline"]`** — sorted list of shallow-copied
+  event dicts, consumed by `TurnSummaryScreen.compose()`.
+
+---
+
 ## [0.9.5] - 2026-04-16
 
 Tab/Escape panel switching and flowchart empty-space click fix. Tab now toggles
