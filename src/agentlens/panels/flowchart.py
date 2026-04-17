@@ -30,6 +30,10 @@ STATUS_STYLE = {
     "error": "red",
 }
 
+# flow mode는 description 전문을 표시하려 하므로 all/running의 MAX_LABEL_LEN(64)과 목적이 다름.
+# 터미널 80칸 기준 가독성 임계값으로 35자를 사용한다.
+_FLOW_LABEL_MAX = 35  # flow mode description 표시 전용 캡
+
 # Short 2-char abbreviations for the subagent tool-breakdown badge shown
 # beneath agent labels. Unknown tools fall back to their first 2 chars.
 _TOOL_ABBREV = {
@@ -322,14 +326,42 @@ class FlowchartPanel(ScrollableContainer):
         if not history:
             return sub
 
-        # Always filter by turn — LIVE shows the current turn only.
+        # P5: turn < 0 early return — 첫 user_message 전에는 빈 그래프를 반환한다.
         turn = self._active_turn
         if turn is None:
             turn = self._graph.get_current_turn_index()
-        if turn >= 0:
-            history = [r for r in history if r.turn_index == turn]
-            if not history:
-                return sub
+        if turn < 0:
+            return sub  # 첫 user_message 전 -- 빈 그래프
+
+        # P3 / AMB-3: turn 필터 + cross-turn 부모 포함.
+        # Step 1: 현재 turn 레코드를 필터링한다.
+        turn_records = [r for r in history if r.turn_index == turn]
+
+        # Step 2: 이 turn에 없는 부모 node_id를 수집한다.
+        turn_node_ids = {r.node_id for r in turn_records}
+        needed_parent_ids: set[str] = set()
+        for r in turn_records:
+            pnid = getattr(r, "parent_node_id", ROOT_ID)
+            if pnid and pnid != ROOT_ID and pnid not in turn_node_ids:
+                needed_parent_ids.add(pnid)
+
+        # Step 3: 전체 history에서 running 상태인 부모 FlowRecord를 찾아
+        # turn_records 앞에 삽입한다. 부모가 자식보다 먼저 처리되어야
+        # last_vid_by_node_id에 부모 vid가 먼저 등록된다.
+        parent_records: list = []
+        if needed_parent_ids:
+            remaining = set(needed_parent_ids)
+            for r in history:
+                if r.node_id in remaining and r.status == "running":
+                    parent_records.append(r)
+                    remaining.discard(r.node_id)
+                if not remaining:
+                    break
+
+        # 부모가 앞에 와야 last_vid_by_node_id에 먼저 등록된다.
+        history = parent_records + turn_records
+        if not history:
+            return sub
 
         # AMB-3: track most recent vid per base node_id so nested children
         # can resolve their parent vid during the same pass.
@@ -337,7 +369,12 @@ class FlowchartPanel(ScrollableContainer):
 
         for i, rec in enumerate(history):
             vid = f"{rec.node_id}@{i}"
+
+            # P4: flow label truncation — description 전문이 길면 35자로 캡.
             flow_label = rec.description if rec.description else rec.label
+            if len(flow_label) > _FLOW_LABEL_MAX:
+                flow_label = flow_label[: _FLOW_LABEL_MAX - 1] + "\u2026"
+
             sub.nodes[vid] = Node(
                 id=vid,
                 label=flow_label,

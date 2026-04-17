@@ -20,6 +20,18 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ### Fixed
 
+- **Flow mode: running parent now links to spawned child** — When agent A is
+  still running as it spawns B in a later turn, B's parent edge now correctly
+  points to A instead of falling back to ROOT. Cross-turn parent FlowRecords
+  are prepended to the turn-filtered set so they register in
+  `last_vid_by_node_id` before their children are processed.
+- **Flow mode: node label capped at 35 chars** — `flow_label` (description or
+  node label) is now truncated to 35 characters with a `…` suffix, matching the
+  layout budget used by all/running modes. Prevents long descriptions from
+  expanding boxes and breaking the ASCII canvas layout.
+- **Flow mode: empty graph before first user message** — `_flow_subgraph()`
+  now returns an empty subgraph when `get_current_turn_index()` returns -1
+  (no user message received yet), consistent with all/running mode behaviour.
 - **Flowchart not updating on Timeline cursor move** — Moving the Timeline
   cursor with `j`/`k` now propagates the active turn to the Flowchart panel
   (same as pressing `[`/`]`). Previously the Flowchart only updated when

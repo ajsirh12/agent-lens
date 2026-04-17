@@ -128,6 +128,9 @@ def test_flow_subgraph_creates_per_invocation_nodes() -> None:
     panel = FlowchartPanel()
     g = panel._graph
 
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
+
     # Three sequential agent spawns that complete before the next starts.
     g.update_from_event(_agent_use("planner", tid="t1"))
     g.update_from_event(_result("t1"))
@@ -167,6 +170,8 @@ def test_flow_subgraph_preserves_instance_status() -> None:
     panel = FlowchartPanel()
     g = panel._graph
 
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
     g.update_from_event(_agent_use("planner", tid="t1"))
     g.update_from_event(_result("t1"))  # marks as done
 
@@ -197,6 +202,9 @@ def test_flow_subgraph_empty_returns_root_only() -> None:
 def test_flow_mode_no_sticky_override() -> None:
     panel = FlowchartPanel(mode="flow")
     g = panel._graph
+
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
 
     # Spawn and complete an agent.
     g.update_from_event(_agent_use("planner", tid="t1"))
@@ -233,6 +241,8 @@ def test_flow_node_uses_instance_description_as_label() -> None:
     panel = FlowchartPanel()
     g = panel._graph
 
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
     g.update_from_event(_agent_use("explore", tid="t1", description="Schema probe"))
     g.update_from_event(_agent_use("explore", tid="t2", description="Code review"))
 
@@ -252,6 +262,8 @@ def test_flow_node_falls_back_to_type_when_no_description() -> None:
     panel = FlowchartPanel()
     g = panel._graph
 
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
     g.update_from_event(_agent_use("planner", tid="t1"))
 
     sub = panel._flow_subgraph()
@@ -268,6 +280,9 @@ def test_flow_parallel_spawns_fork_from_same_parent() -> None:
     connect to ROOT (nothing completed before ts=1)."""
     panel = FlowchartPanel()
     g = panel._graph
+
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
 
     # Create three agent types so each gets its own node + instance.
     g.update_from_event(_agent_use("alpha", tid="tA"))
@@ -307,6 +322,9 @@ def test_flow_sequential_after_parallel_joins() -> None:
     (the last to complete before C started)."""
     panel = FlowchartPanel()
     g = panel._graph
+
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
 
     g.update_from_event(_agent_use("alpha", tid="tA"))
     g.update_from_event(_agent_use("beta", tid="tB"))
@@ -476,6 +494,9 @@ def test_instant_ack_does_not_break_fork_detection() -> None:
     panel = FlowchartPanel()
     g = panel._graph
 
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
+
     # A completes with an instant ack (0.003s duration).
     g.update_from_event(_agent_use("alpha", tid="tA"))
     g.update_from_event(_result("tA"))
@@ -516,6 +537,9 @@ def test_real_completion_creates_sequential_chain() -> None:
     should chain from it (not fork from ROOT)."""
     panel = FlowchartPanel()
     g = panel._graph
+
+    # P5: user_message must be injected so turn index becomes >= 0.
+    g.update_from_event(_user_message())
 
     g.update_from_event(_agent_use("alpha", tid="tA"))
     g.update_from_event(_result("tA"))

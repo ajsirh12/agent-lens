@@ -23,6 +23,9 @@ actionable later without reconstructing the reasoning.
 | v0.9.6 | Turn Summary mini timeline — per-turn tool call DataTable (time/tool/agent/sts/dur), `TurnRecord.tool_events`, `MAX_TOOL_EVENTS=200` |
 | v0.9.7 | Timeline turn-only mode — main Timeline shows only turn markers (ts / Turn N / prompt / tool count / duration); tool-level detail via TurnSummaryScreen (Enter); ToolDetailScreen dead code removed from app.py |
 | v0.9.8 | TurnSummaryScreen fixed header — Turn / Prompt / Duration / token summary line pinned to top; scrollable body holds Agents/Skills, Tool Usage, MCP, Hooks, Token Usage detail, Tool Calls DataTable; token usage visible without scrolling |
+| Unreleased | Flow mode P3 fix: cross-turn running parent now correctly links to spawned child (parent_records prepended before turn_records) |
+| Unreleased | Flow mode P4 fix: flow_label capped at 35 chars with `…` suffix; `_FLOW_LABEL_MAX=35` constant added |
+| Unreleased | Flow mode P5 fix: turn < 0 returns empty subgraph (consistent with all/running modes) |
 | Unreleased | TurnSummaryScreen 4-section independent scroll — Token Usage / Agents·Skills / Tool Usage+MCP+Hooks / Tool Calls DataTable each get `height: 1fr`; no section crowds another; display caps (`+N more`) removed |
 | Unreleased | Timeline auto-scroll to latest turn on startup — `_do_scroll_to_end` catch-up guard uses snapshot to distinguish bulk ingestion from manual scroll |
 | Unreleased | Flowchart layout coalescing — dirty flag + `call_after_refresh` batches N events per frame, eliminates startup slowness on large sessions |
@@ -257,61 +260,42 @@ correctly display nested spawns under their parent. Fixed in v0.9.2.
 
 ---
 
-### P3. Running nodes excluded from parent chain `[priority: 2]`
+### P3. Running nodes excluded from parent chain `[FIXED in Unreleased]`
 
-A node only enters `completed_*` after it finishes. While A is still
+~~A node only enters `completed_*` after it finishes. While A is still
 running, if A spawns B, B's parent resolves to the last completed node
-before A (e.g. `main`) instead of A:
+before A (e.g. `main`) instead of A.~~
 
-```
-Actual flow:  main → A → B   (A spawned B mid-run)
-Flow display: main → A
-              main → B        (A skipped)
-```
-
-**Root cause**: `completed_*` only contains nodes where
-`ended_ts is not None and duration >= _MIN_REAL_DURATION`.
-
-**Fix**: Introduce a third list `active: list[tuple[float, str]]`
-(started_ts, vid) that tracks currently running nodes. When finding a
-parent, prefer the deepest active ancestor over completed ones if the
-active node's `started_ts < rec.started_ts`. Clear entries from
-`active` when the node completes.
-
-**Scope**: `_flow_subgraph()` in `flowchart.py`. ~20 LOC + 3–4 tests.
+**Resolved**: Cross-turn parent FlowRecords are now identified and prepended
+to the turn-filtered history before processing. When `_flow_subgraph()` builds
+the `last_vid_by_node_id` map, parent nodes register first, so children
+correctly link to their running parents instead of to ROOT. Fixed in Unreleased.
 
 ---
 
-### P4. Description length uncapped `[priority: 3]`
+### P4. Description length uncapped `[FIXED in Unreleased]`
 
-`flow_label = rec.description if rec.description else rec.label`
-
+~~`flow_label = rec.description if rec.description else rec.label`
 `all`/`running` modes apply `_display_label()` + `MAX_LABEL_LEN=64`.
 Flow mode uses `description` raw — long descriptions overflow node
-boxes and break terminal layout.
+boxes and break terminal layout.~~
 
-**Fix**: Truncate `flow_label` at 35 chars with `…` suffix, matching
-the `[all]` mode truncation rule.
-
-**Scope**: One line in `_flow_subgraph()`. ~5 LOC + 1–2 tests.
+**Resolved**: `_FLOW_LABEL_MAX = 35` constant added; `flow_label` is now
+truncated to 35 characters with a `…` suffix, matching the layout budget
+used by all/running modes. Prevents long descriptions from expanding boxes
+and breaking the ASCII canvas layout. Fixed in Unreleased.
 
 ---
 
-### P5. turn=-1 skips filter, shows full history `[priority: 4]`
+### P5. turn=-1 skips filter, shows full history `[FIXED in Unreleased]`
 
-```python
-if turn >= 0:   # turn=-1 (before first user_message) skips this
-    history = [r for r in history if r.turn_index == turn]
-```
-
-Before the first user message, `get_current_turn_index()` returns
+~~Before the first user message, `get_current_turn_index()` returns
 `-1` and the filter is bypassed, showing the entire `_flow_history`
-across all turns. Other modes return an empty graph at this point.
+across all turns. Other modes return an empty graph at this point.~~
 
-**Fix**: Treat `turn < 0` as "no history yet" and return an empty
-subgraph, consistent with other modes.
-
-**Scope**: Two lines in `_flow_subgraph()`. ~5 LOC + 1 test.
+**Resolved**: `_flow_subgraph()` now returns an empty subgraph when
+`get_current_turn_index()` returns -1 (no user message received yet),
+consistent with all/running mode behaviour. Fixed in Unreleased.
 
 ---
 
@@ -319,15 +303,16 @@ subgraph, consistent with other modes.
 
 - P1: ~1.5h + 4–5 tests. Touches graph model and flowchart. **[FIXED v0.9.1]**
 - P2: ~2h + 7 tests. Touches graph model and flowchart. **[FIXED v0.9.2]**
-- P3: ~1h + 3–4 tests. Flowchart only.
-- P4: ~15min + 1–2 tests. One-liner.
-- P5: ~15min + 1 test. One-liner.
-- Total remaining: ~1.5h + ~6 tests.
+- P3: ~1h + 3–4 tests. Flowchart only. **[FIXED Unreleased]**
+- P4: ~15min + 1–2 tests. One-liner. **[FIXED Unreleased]**
+- P5: ~15min + 1 test. One-liner. **[FIXED Unreleased]**
+- **Total: All flow-mode improvements (P1–P5) complete.**
 
 ### When to do it
 
-Fix in order (P3 → P4 → P5). P1 and P2 are complete. P3 is next priority
-(description length capping for layout stability).
+All P1–P5 improvements shipped in Unreleased. Flow mode now correctly handles
+cross-turn parent links, caps label length, and returns empty graphs before
+first user message. No remaining flow-mode issues.
 
 ---
 
