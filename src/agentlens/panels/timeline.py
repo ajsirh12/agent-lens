@@ -43,6 +43,12 @@ class TimelinePanel(Container):
         # add_events in one frame result in a single cursor move at the
         # next refresh tick instead of 500 redundant move_cursor calls.
         self._scroll_pending = False
+        # Row count at the time _scroll_to_end() was called. Used by
+        # _do_scroll_to_end() to detect the catch-up scenario: if more
+        # rows were added between scheduling and the callback, we're
+        # still ingesting and should always jump to the tail regardless
+        # of cursor position.
+        self._row_count_at_schedule: int = 0
         self._turn_counter: int = 0
         # When the timeline itself changes selected_agent_id (because the
         # user highlighted a row), we must NOT let _on_app_agent_changed
@@ -208,6 +214,7 @@ class TimelinePanel(Container):
         if self._table is None or self._scroll_pending:
             return
         self._scroll_pending = True
+        self._row_count_at_schedule = self._row_count
         try:
             self.call_after_refresh(self._do_scroll_to_end)
         except Exception:
@@ -231,12 +238,19 @@ class TimelinePanel(Container):
         total = self._row_count
         if total == 0:
             return
-        # Guard against overriding a manual scroll. If the user moved the
-        # cursor more than 1 row above the last row between when
-        # _scroll_to_end() was called and now, skip the jump.
         cursor = self._table.cursor_row
-        if cursor is not None and cursor >= 0 and cursor < total - 1:
-            return
+        # Catch-up scenario (startup / bulk ingestion): rows were added
+        # between when _scroll_to_end() was scheduled and now. The cursor
+        # is still near 0 while `total` is large — the old guard would
+        # falsely abort. When rows were added since scheduling, always
+        # jump to the tail unconditionally.
+        rows_added_since_schedule = total > self._row_count_at_schedule
+        if not rows_added_since_schedule:
+            # Guard against overriding a manual scroll. If the user moved
+            # the cursor more than one row above the tail while no new
+            # rows arrived, their intent takes priority.
+            if cursor is not None and cursor >= 0 and cursor < total - 1:
+                return
         self._updating = True
         try:
             try:
@@ -384,6 +398,7 @@ class TimelinePanel(Container):
         self._updating = False
         self._row_count = 0
         self._scroll_pending = False
+        self._row_count_at_schedule = 0
         self._turn_counter = 0
         self._highlight_from_timeline = False
         if self._table is None:
