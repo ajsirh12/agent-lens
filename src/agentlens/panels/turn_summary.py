@@ -106,29 +106,34 @@ def _fmt_token_row(label: str, tokens: dict, bold: bool = False, dim: bool = Fal
     return row
 
 
-def _build_lines(s: dict[str, Any]) -> list[str]:
-    """Build the ordered list of text lines for the modal body.
+def _fmt_token_summary(token_total: dict) -> str:
+    """Format a 1-line token summary for the fixed header."""
+    total_sum = sum(int(token_total.get(k, 0) or 0)
+                    for k in ("input", "output", "cache_read", "cache_create"))
+    if total_sum == 0:
+        return ""
+    inp = _fmt_tokens(int(token_total.get("input", 0) or 0))
+    out = _fmt_tokens(int(token_total.get("output", 0) or 0))
+    cr = _fmt_tokens(int(token_total.get("cache_read", 0) or 0))
+    cw = _fmt_tokens(int(token_total.get("cache_create", 0) or 0))
+    return f"Tokens: {inp} in / {out} out / {cr} cache-r / {cw} cache-w"
 
-    Returns plain markup strings (no Static wrappers) so the function
-    can be unit-tested without a running Textual app.
-    """
+
+def _build_header_lines(s: dict[str, Any]) -> list[str]:
+    """Build the fixed header lines: Turn, Prompt, Duration, Token summary."""
     lines: list[str] = []
-
     index = int(s.get("index", 0))
     prompt = _sanitize(s.get("prompt", ""))
     duration = float(s.get("duration_s", 0.0))
     agent_count = int(s.get("agent_count", 0))
     skill_count = int(s.get("skill_count", 0))
     error_count = int(s.get("error_count", 0))
-    total_agent_dur = float(s.get("total_agent_duration_s", 0.0))
     is_live = s.get("end_ts") is None
 
     header_parts = [f"Turn {index + 1}"]
     if is_live:
         header_parts.append("(LIVE)")
-    header = " ".join(header_parts)
-
-    lines.append(f"[bold]{header}[/bold]")
+    lines.append(f"[bold]{' '.join(header_parts)}[/bold]")
     lines.append(f"Prompt:   {prompt if prompt else '(empty)'}")
     lines.append(
         f"Duration: {_fmt_dur(duration)}"
@@ -136,6 +141,18 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
         f"   Skills: {skill_count}"
         f"   Errors: {error_count}"
     )
+    token_summary = _fmt_token_summary(s.get("token_total") or {})
+    if token_summary:
+        lines.append(token_summary)
+    return lines
+
+
+def _build_body_lines(s: dict[str, Any]) -> list[str]:
+    """Build the scrollable body lines: agent time, agents, tools, tokens, etc."""
+    lines: list[str] = []
+
+    duration = float(s.get("duration_s", 0.0))
+    total_agent_dur = float(s.get("total_agent_duration_s", 0.0))
     if total_agent_dur > 0:
         lines.append(
             f"Total agent time: {_fmt_dur(total_agent_dur)}"
@@ -355,6 +372,16 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _build_lines(s: dict[str, Any]) -> list[str]:
+    """Build the ordered list of text lines for the modal body.
+
+    Retained as a wrapper for backward compatibility with tests.
+    Returns plain markup strings (no Static wrappers) so the function
+    can be unit-tested without a running Textual app.
+    """
+    return _build_header_lines(s) + _build_body_lines(s)
+
+
 class TurnSummaryScreen(Screen[None]):
     """Full-screen summary of a single turn's orchestration."""
 
@@ -362,9 +389,18 @@ class TurnSummaryScreen(Screen[None]):
     TurnSummaryScreen {
         background: $panel;
     }
+    #turn-summary-header {
+        dock: top;
+        width: 100%;
+        height: auto;
+        max-height: 6;
+        padding: 1 2 0 2;
+        background: $panel;
+        border-bottom: solid $accent;
+    }
     #turn-summary-scroll {
         width: 100%;
-        height: 100%;
+        height: 1fr;
         padding: 1 2;
     }
     #turn-tool-timeline {
@@ -380,12 +416,17 @@ class TurnSummaryScreen(Screen[None]):
         self.summary = summary
 
     def compose(self) -> ComposeResult:
-        lines = _build_lines(self.summary)
+        from datetime import datetime, timezone
+
+        header_lines = _build_header_lines(self.summary)
+        body_lines = _build_body_lines(self.summary)
         tool_timeline = self.summary.get("tool_timeline", []) or []
+
+        yield Static("\n".join(header_lines), id="turn-summary-header")
 
         with ScrollableContainer(id="turn-summary-scroll"):
             with Vertical(id="turn-summary-body"):
-                for line in lines:
+                for line in body_lines:
                     if line in (
                         "(no agent or skill invocations)",
                         "(Esc / Enter to close)",
@@ -406,7 +447,6 @@ class TurnSummaryScreen(Screen[None]):
                 for evt in tool_timeline[:_TOP_N_TIMELINE]:
                     try:
                         ts = evt.get("ts", 0.0)
-                        from datetime import datetime, timezone
                         time_str = datetime.fromtimestamp(
                             ts, tz=timezone.utc
                         ).strftime("%H:%M:%S")

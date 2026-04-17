@@ -119,6 +119,7 @@ that occurred during manual scrolling. 281 tests passing.
 ### Changed
 
 - Timeline panel now shows only turn markers (ts / Turn N / prompt / tool count / duration); individual tool calls visible in TurnSummaryScreen (Enter)
+- TurnSummaryScreen now shows a fixed header (Turn / Prompt / Duration / token summary) with a scrollable body; token usage is immediately visible without scrolling even when Agents/Skills list is long
 
 ---
 

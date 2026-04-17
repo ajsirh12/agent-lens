@@ -85,6 +85,12 @@ nested subagent trees and parallel-instance views.
   spans list their sub-agents with 4-space indentation; standalone agents
   appear under a separate `agents (N)` section. Double-counting is
   prevented — `Total` is the leaf sum only.
+- **TurnSummaryScreen fixed header** (v0.9.8): the Turn / Prompt /
+  Duration·Agents·Skills·Errors / token summary line (`Tokens: Xk in /
+  Yk out / ...`) are pinned to the top of the modal. The scrollable body
+  holds Agents/Skills, Tool Usage, MCP, Hooks, Token Usage detail, and
+  the Tool Calls DataTable. Token usage is immediately visible without
+  scrolling, even when the Agents/Skills list is long.
 - **Panel focus-based key routing** — clicking the Flowchart panel routes
   `↑`/`↓`/`j`/`k` to canvas scroll; clicking the Timeline panel routes them to
   DataTable cursor movement. Default at startup is Flowchart. Active panel is

@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
+
 from agentlens.events import EventType, HarnessEvent
 from agentlens.graph_model import CallGraph
 from agentlens.panels.turn_summary import (
     _build_lines,
+    _build_header_lines,
+    _build_body_lines,
+    _fmt_token_summary,
     _fmt_ms,
     _fmt_tokens,
     _mcp_display,
@@ -895,3 +900,174 @@ def test_existing_sections_unchanged() -> None:
     assert "(Esc / Enter to close)" in combined
     # tool_timeline does NOT appear in _build_lines (it's rendered as DataTable)
     assert "Tool Calls" not in combined
+
+
+# --- _fmt_token_summary tests ---
+
+
+def test_fmt_token_summary_format() -> None:
+    """_fmt_token_summary returns correctly formatted 1-line summary."""
+    tokens = {"input": 45000, "output": 12000, "cache_read": 100000, "cache_create": 2000}
+    result = _fmt_token_summary(tokens)
+    assert "Tokens:" in result
+    assert "in" in result
+    assert "out" in result
+    assert "cache-r" in result
+    assert "cache-w" in result
+
+
+def test_fmt_token_summary_empty_when_zero() -> None:
+    """_fmt_token_summary returns empty string when all token values are zero."""
+    assert _fmt_token_summary({}) == ""
+    assert _fmt_token_summary({"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}) == ""
+
+
+def test_fmt_token_summary_partial_zeros() -> None:
+    """_fmt_token_summary returns non-empty when at least one token value > 0."""
+    result = _fmt_token_summary({"input": 1000, "output": 0, "cache_read": 0, "cache_create": 0})
+    assert result != ""
+    assert "Tokens:" in result
+
+
+# --- _build_header_lines tests ---
+
+
+def test_build_header_lines_contains_turn_info() -> None:
+    """_build_header_lines returns Turn number, Prompt, Duration lines."""
+    summary = {
+        "index": 0,
+        "prompt": "hello world",
+        "duration_s": 10.0,
+        "agent_count": 2,
+        "skill_count": 3,
+        "error_count": 0,
+        "end_ts": 10.0,
+        "agents": [],
+    }
+    lines = _build_header_lines(summary)
+    combined = "\n".join(lines)
+    assert "Turn 1" in combined
+    assert "hello world" in combined
+    assert "Duration:" in combined
+    assert "Agents: 2" in combined
+    assert "Skills: 3" in combined
+
+
+def test_build_header_lines_contains_token_summary() -> None:
+    """_build_header_lines includes Tokens line when token data exists."""
+    summary = {
+        "index": 0,
+        "prompt": "test",
+        "duration_s": 5.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "end_ts": 5.0,
+        "agents": [],
+        "token_total": {"input": 1000, "output": 500, "cache_read": 0, "cache_create": 0},
+    }
+    lines = _build_header_lines(summary)
+    combined = "\n".join(lines)
+    assert "Tokens:" in combined
+
+
+def test_build_header_lines_no_token_when_zero() -> None:
+    """_build_header_lines omits Tokens line when all token values are zero."""
+    summary = {
+        "index": 0,
+        "prompt": "test",
+        "duration_s": 5.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "end_ts": 5.0,
+        "agents": [],
+        "token_total": {},
+    }
+    lines = _build_header_lines(summary)
+    combined = "\n".join(lines)
+    assert "Tokens:" not in combined
+
+
+# --- _build_body_lines tests ---
+
+
+def test_build_body_lines_ends_with_close_hint() -> None:
+    """_build_body_lines last non-empty line is the Esc/Enter close hint."""
+    summary = {
+        "index": 0,
+        "prompt": "test",
+        "duration_s": 5.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "end_ts": 5.0,
+        "agents": [],
+    }
+    lines = _build_body_lines(summary)
+    non_empty = [ln for ln in lines if ln.strip()]
+    assert non_empty[-1] == "(Esc / Enter to close)"
+
+
+def test_build_lines_backward_compat() -> None:
+    """_build_lines() == _build_header_lines() + _build_body_lines() (backward compat)."""
+    summary = {
+        "index": 2,
+        "prompt": "compat test",
+        "duration_s": 30.0,
+        "agent_count": 1,
+        "skill_count": 2,
+        "error_count": 0,
+        "total_agent_duration_s": 25.0,
+        "end_ts": 30.0,
+        "agents": [
+            {"label": "planner", "description": "Plan work",
+             "node_type": "agent", "duration_s": 10.0,
+             "status": "done", "is_background": False}
+        ],
+        "token_total": {"input": 5000, "output": 1000, "cache_read": 0, "cache_create": 0},
+    }
+    assert _build_lines(summary) == _build_header_lines(summary) + _build_body_lines(summary)
+
+
+# --- async UI tests ---
+
+
+@pytest.mark.asyncio
+async def test_header_widget_present(tmp_path) -> None:
+    """compose() must yield a Static widget with id='turn-summary-header'."""
+    from agentlens.app import AgentlensApp
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+
+    jsonl = tmp_path / "test.jsonl"
+    jsonl.write_text("")
+    app = AgentlensApp(
+        session_override=jsonl,
+        state_dir_override=tmp_path / "state",
+    )
+    summary = {
+        "index": 0,
+        "prompt": "header test",
+        "duration_s": 5.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "end_ts": 5.0,
+        "agents": [],
+        "token_total": {"input": 1000, "output": 500, "cache_read": 0, "cache_create": 0},
+        "tool_timeline": [],
+    }
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = TurnSummaryScreen(summary)
+        await app.push_screen(screen)
+        await pilot.pause()
+        # #turn-summary-header must exist
+        header = screen.query_one("#turn-summary-header")
+        assert header is not None
+        # token summary must appear in header text
+        header_text = str(header.render())
+        assert "Tokens:" in header_text
+        # #turn-summary-scroll must also exist (scrollable body)
+        scroll = screen.query_one("#turn-summary-scroll")
+        assert scroll is not None
