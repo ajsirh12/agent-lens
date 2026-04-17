@@ -113,6 +113,12 @@ class FlowchartPanel(ScrollableContainer):
         self._layout: LayoutResult = self._compute_layout()
         self._canvas: Static | None = None
         self._updating = False
+        # Deferred-render coalescing: during bulk ingestion (catch-up at
+        # startup) many events arrive in the same frame. Instead of calling
+        # _compute_layout + _refresh_canvas on every event, we mark the
+        # layout as dirty and schedule a single deferred refresh per frame.
+        self._layout_dirty: bool = False
+        self._refresh_pending: bool = False
 
     def compose(self) -> ComposeResult:
         self._canvas = Static(self._render_text(), id="flowchart-canvas")
@@ -131,8 +137,33 @@ class FlowchartPanel(ScrollableContainer):
     def add_event(self, ev: HarnessEvent) -> None:
         changed = self._graph.update_from_event(ev)
         if changed:
+            self._layout_dirty = True
+            self._schedule_refresh()
+
+    def _schedule_refresh(self) -> None:
+        """Coalesce layout+render into one call per frame.
+
+        Many add_event calls within a single Textual frame (e.g. bulk
+        catch-up at startup) would otherwise trigger N expensive
+        _compute_layout + _refresh_canvas calls. This schedules a single
+        deferred callback per frame via call_after_refresh.
+        """
+        if self._refresh_pending:
+            return
+        self._refresh_pending = True
+        try:
+            self.call_after_refresh(self._do_deferred_refresh)
+        except Exception:
+            # Pre-mount or test context — fall back to immediate.
+            self._refresh_pending = False
+            self._do_deferred_refresh()
+
+    def _do_deferred_refresh(self) -> None:
+        self._refresh_pending = False
+        if self._layout_dirty:
             self._layout = self._compute_layout()
-            self._refresh_canvas()
+            self._layout_dirty = False
+        self._refresh_canvas()
 
     # ------------------------------------------------------------------
     def clear(self) -> None:
@@ -143,6 +174,8 @@ class FlowchartPanel(ScrollableContainer):
         self._selected_flow_vid = None
         self._selected_nid = None
         self._active_turn = None
+        self._layout_dirty = False
+        self._refresh_pending = False
         self._layout = self._compute_layout()
         self._refresh_canvas()
 
@@ -161,6 +194,7 @@ class FlowchartPanel(ScrollableContainer):
     def toggle_orientation(self) -> Orientation:
         self._orientation = "topdown" if self._orientation == "leftright" else "leftright"
         self._layout = self._compute_layout()
+        self._layout_dirty = False
         self._refresh_canvas()
         return self._orientation
 
@@ -172,6 +206,7 @@ class FlowchartPanel(ScrollableContainer):
         else:
             self._mode = "all"
         self._layout = self._compute_layout()
+        self._layout_dirty = False
         self._refresh_canvas()
         return self._mode
 

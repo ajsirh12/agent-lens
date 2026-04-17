@@ -594,6 +594,7 @@ class AgentlensApp(App[int]):
         if self._flowchart is not None:
             self._flowchart._active_turn = self._active_turn
             self._flowchart._layout = self._flowchart._compute_layout()
+            self._flowchart._layout_dirty = False
             self._flowchart._refresh_canvas()
 
     def action_prev_turn(self) -> None:
