@@ -476,26 +476,26 @@ async def test_get_selected_turn_index_detects_turn_marker(tmp_path) -> None:
         fc = app._flowchart
         assert tl is not None and fc is not None
 
-        # Feed a real user message to create a turn marker row.
+        # Feed two real user messages to create two turn marker rows.
+        # In turn-only mode, tool_use/tool_result do NOT add rows.
         tl.add_event(_user("first turn"))
-        tl.add_event(_agent("planner", "t1"))
-        tl.add_event(_result("t1"))
+        tl.add_event(_user("second turn"))
         await pilot.pause()
 
-        # Position cursor on the turn marker row (the first row).
+        # Position cursor on the first turn marker row (row 0 = Turn 1).
         if tl._table is not None:
             tl._table.move_cursor(row=0)
         await pilot.pause()
 
         idx = tl.get_selected_turn_index()
-        assert idx == 0, f"expected turn 0 on turn marker, got {idx}"
+        assert idx == 0, f"expected turn 0 on row 0, got {idx}"
 
-        # Cursor on a non-turn row returns None.
+        # Position cursor on the second turn marker row (row 1 = Turn 2).
         if tl._table is not None:
             tl._table.move_cursor(row=1)
         await pilot.pause()
         idx2 = tl.get_selected_turn_index()
-        assert idx2 is None, f"expected None on non-turn row, got {idx2}"
+        assert idx2 == 1, f"expected turn 1 on row 1, got {idx2}"
 
 
 # --- _fmt_tokens boundary tests ---

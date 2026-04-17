@@ -37,6 +37,25 @@ def _tool_use_line(idx: int) -> str:
     )
 
 
+def _user_message_line(idx: int) -> str:
+    return (
+        json.dumps(
+            {
+                "type": "user",
+                "sessionId": "s",
+                "timestamp": "2026-04-08T10:00:00Z",
+                "uuid": f"u{idx}",
+                "isSidechain": False,
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": f"hello {idx}"}],
+                },
+            }
+        )
+        + "\n"
+    )
+
+
 @pytest.mark.asyncio
 async def test_launches_and_renders_empty(tmp_path: Path) -> None:
     empty_file = tmp_path / "empty.jsonl"
@@ -62,9 +81,9 @@ async def test_live_tail_latency_under_one_second(tmp_path: Path) -> None:
     )
     async with app.run_test() as pilot:
         await pilot.pause()
-        # Append a line.
+        # Append a user message line (turn-only mode: only user_message adds a row).
         with target.open("a") as f:
-            f.write(_tool_use_line(1))
+            f.write(_user_message_line(1))
         # Poll up to 1.5s for row_count increment.
         timeline = app._timeline
         assert timeline is not None

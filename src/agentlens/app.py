@@ -17,7 +17,6 @@ from .activity_rate import ActivityRate
 from .locator import SessionLocator
 from .messages import HarnessEventMessage
 from .omc_state import OmcStateReader
-from .panels.detail_modal import ToolDetailScreen
 from .panels.flowchart import FlowchartPanel
 from .panels.session_path_input import SessionPathInputScreen
 from .panels.session_picker import SessionPickerScreen
@@ -355,26 +354,11 @@ class AgentlensApp(App[int]):
     def action_show_detail(self) -> None:
         if self._timeline is None:
             return
-        # Turn marker rows get a dedicated summary modal instead of the
-        # generic tool detail screen. Check this before falling through.
         turn_idx = self._timeline.get_selected_turn_index()
         if turn_idx is not None and self._flowchart is not None:
             summary = self._flowchart._graph.get_turn_summary(turn_idx)
             from .panels.turn_summary import TurnSummaryScreen
             self.push_screen(TurnSummaryScreen(summary))
-            return
-        cells = self._timeline.get_selected_row_cells()
-        if cells is None:
-            return
-        # cells: ts, tool, agent, status, dur_ms
-        self.push_screen(
-            ToolDetailScreen(
-                tool_name=cells[1],
-                input_summary=self._timeline.get_selected_input_summary(),
-                status=cells[3],
-                duration_ms=cells[4],
-            )
-        )
 
     def action_drill_down(self) -> None:
         """Open the SubagentDetailScreen for the currently selected

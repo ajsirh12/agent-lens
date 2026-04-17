@@ -116,6 +116,10 @@ that occurred during manual scrolling. 281 tests passing.
 
 ## [Unreleased]
 
+### Changed
+
+- Timeline panel now shows only turn markers (ts / Turn N / prompt / tool count / duration); individual tool calls visible in TurnSummaryScreen (Enter)
+
 ---
 
 ## [0.9.6] - 2026-04-16

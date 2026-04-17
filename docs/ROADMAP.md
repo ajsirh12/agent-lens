@@ -21,6 +21,7 @@ actionable later without reconstructing the reasoning.
 | v0.9.2 | Nested spawn FlowRecord + tree topology (nested children now appear under parent node in flow mode) |
 | v0.9.3 | Panel focus-based key routing (`↑`/`↓`/`j`/`k` routed to active panel); active panel green border; timeline cursor snap-to-bottom bug fix (`_highlight_from_timeline` flag + `_do_scroll_to_end` guard) |
 | v0.9.6 | Turn Summary mini timeline — per-turn tool call DataTable (time/tool/agent/sts/dur), `TurnRecord.tool_events`, `MAX_TOOL_EVENTS=200` |
+| v0.9.7 | Timeline turn-only mode — main Timeline shows only turn markers (ts / Turn N / prompt / tool count / duration); tool-level detail via TurnSummaryScreen (Enter); ToolDetailScreen dead code removed from app.py |
 | — | M-AC8-idle automated (test_idle_footer.py); M-AC11 measured at 0.16% idle CPU |
 
 ---

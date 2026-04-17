@@ -1,4 +1,4 @@
-"""Tests for TimelinePanel: sanitization, pending_use cap, input_summary."""
+"""Tests for TimelinePanel: sanitization, turn-only mode."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from agentlens.events import EventType, HarnessEvent
-from agentlens.panels.timeline import MAX_PENDING
 
 
 def _make_event(
@@ -44,9 +43,21 @@ def _make_result_event(
     )
 
 
+def _make_user_message_event(
+    text: str = "hello",
+    ts: datetime | None = None,
+) -> HarnessEvent:
+    return HarnessEvent(
+        type=EventType.user_message,
+        ts=ts or datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"text": text, "role": "user"},
+    )
+
+
 @pytest.mark.asyncio
 async def test_timeline_sanitizes_ansi_escape_in_cells(tmp_path: Path) -> None:
-    """ANSI escape sequences in tool_name must be stripped from DataTable cells."""
+    """ANSI escape sequences in user prompt must be stripped from the turn row prompt column."""
     from agentlens.app import AgentlensApp
 
     app = AgentlensApp(
@@ -58,92 +69,26 @@ async def test_timeline_sanitizes_ansi_escape_in_cells(tmp_path: Path) -> None:
         await pilot.pause()
         timeline = app._timeline
         assert timeline is not None
-        ev = _make_event(tool_name="\x1b[31mbad\x1b[0m", tool_use_id="tid-ansi")
-        timeline.add_event(ev)
-        await pilot.pause()
-        # Inspect via public method
-        # Move cursor to the row and check cells
-        assert timeline._table is not None
-        timeline.get_selected_row_cells()
-        # cells could be None if cursor not on our row yet; check the row directly
-        # via _table rows
-        rows = list(timeline._table.rows.keys())
-        assert len(rows) >= 1
-        row_key = rows[-1]
-        row_cells = [timeline._table.get_cell_at((timeline._row_index(row_key), c)) for c in range(5)]
-        tool_cell = str(row_cells[1])
-        assert "\x1b" not in tool_cell, f"ANSI escape found in cell: {tool_cell!r}"
-        assert "bad" in tool_cell  # content preserved without escape codes
 
-
-@pytest.mark.asyncio
-async def test_timeline_pending_use_cap_evicts_oldest(tmp_path: Path) -> None:
-    """Feeding 2001 tool_use events should keep _pending_use at <= MAX_PENDING."""
-    from agentlens.app import AgentlensApp
-
-    app = AgentlensApp(
-        session_override=tmp_path / "empty.jsonl",
-        state_dir_override=tmp_path / "state-absent",
-    )
-    (tmp_path / "empty.jsonl").write_text("")
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        timeline = app._timeline
-        assert timeline is not None
-        for i in range(MAX_PENDING + 1):
-            ev = _make_event(tool_name="Bash", tool_use_id=f"tid-{i}")
-            timeline.add_event(ev)
-        assert len(timeline._pending_use) <= MAX_PENDING
-
-
-@pytest.mark.asyncio
-async def test_action_show_detail_passes_populated_input_summary(tmp_path: Path) -> None:
-    """action_show_detail must pass a non-empty input_summary when input has a command."""
-    from agentlens.app import AgentlensApp
-
-    app = AgentlensApp(
-        session_override=tmp_path / "empty.jsonl",
-        state_dir_override=tmp_path / "state-absent",
-    )
-    (tmp_path / "empty.jsonl").write_text("")
-    captured: list = []
-
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        timeline = app._timeline
-        assert timeline is not None
-
-        ev = _make_event(
-            tool_name="Bash",
-            tool_use_id="tid-input",
-            inp={"command": "echo hi"},
+        # user_message event with ANSI in text
+        ev = HarnessEvent(
+            type=EventType.user_message,
+            ts=datetime.now(timezone.utc),
+            agent_id=None,
+            payload={"text": "\x1b[31mbad prompt\x1b[0m", "role": "user"},
         )
         timeline.add_event(ev)
         await pilot.pause()
 
-        # Move cursor to the new row (last row)
         assert timeline._table is not None
         rows = list(timeline._table.rows.keys())
-        last_idx = len(rows) - 1
-        timeline._table.move_cursor(row=last_idx)
-        await pilot.pause()
+        assert len(rows) >= 1, "Expected at least one turn row"
+        row_key = rows[-1]
+        # prompt is column index 2 in turn-only mode (ts, turn, prompt, tools, dur)
+        prompt_cell = str(timeline._table.get_cell_at((timeline._row_index(row_key), 2)))
+        assert "\x1b" not in prompt_cell, f"ANSI escape found in cell: {prompt_cell!r}"
+        assert "bad prompt" in prompt_cell
 
-        # Intercept push_screen
-        original_push = app.push_screen
-
-        def _capture_push(screen, *args, **kwargs):
-            captured.append(screen)
-            return original_push(screen, *args, **kwargs)
-
-        app.push_screen = _capture_push  # type: ignore[method-assign]
-        app.action_show_detail()
-        await pilot.pause()
-
-    assert len(captured) >= 1, "push_screen was not called"
-    modal = captured[0]
-    assert "echo hi" in modal.input_summary, (
-        f"Expected 'echo hi' in input_summary, got: {modal.input_summary!r}"
-    )
 
 
 @pytest.mark.asyncio
@@ -178,8 +123,8 @@ async def test_detail_modal_sanitizes_fields(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_use_row_has_start_prefix(tmp_path: Path) -> None:
-    """tool_use rows should have a '▶ ' prefix on the tool column."""
+async def test_tool_use_event_does_not_add_row(tmp_path: Path) -> None:
+    """tool_use event must not add any row in turn-only mode."""
     from agentlens.app import AgentlensApp
 
     app = AgentlensApp(
@@ -191,20 +136,67 @@ async def test_tool_use_row_has_start_prefix(tmp_path: Path) -> None:
         await pilot.pause()
         timeline = app._timeline
         assert timeline is not None
-        ev = _make_event(tool_name="Bash", tool_use_id="tid-prefix")
+        ev = _make_event(tool_name="Bash", tool_use_id="tid-no-row")
+        timeline.add_event(ev)
+        await pilot.pause()
+        assert timeline._row_count == 0, f"Expected 0 rows, got {timeline._row_count}"
+
+
+@pytest.mark.asyncio
+async def test_tool_result_event_does_not_add_row(tmp_path: Path) -> None:
+    """tool_result event must not add any row in turn-only mode."""
+    from agentlens.app import AgentlensApp
+
+    app = AgentlensApp(
+        session_override=tmp_path / "empty.jsonl",
+        state_dir_override=tmp_path / "state-absent",
+    )
+    (tmp_path / "empty.jsonl").write_text("")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        timeline = app._timeline
+        assert timeline is not None
+        result_ev = _make_result_event(tool_use_id="tid-no-row-result")
+        timeline.add_event(result_ev)
+        await pilot.pause()
+        assert timeline._row_count == 0, f"Expected 0 rows, got {timeline._row_count}"
+
+
+@pytest.mark.asyncio
+async def test_turn_row_has_correct_columns(tmp_path: Path) -> None:
+    """Turn row must have 5 columns: (ts, 'Turn N', prompt_preview, '0', 'LIVE')."""
+    from agentlens.app import AgentlensApp
+
+    app = AgentlensApp(
+        session_override=tmp_path / "empty.jsonl",
+        state_dir_override=tmp_path / "state-absent",
+    )
+    (tmp_path / "empty.jsonl").write_text("")
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        timeline = app._timeline
+        assert timeline is not None
+        ev = _make_user_message_event(text="hello world")
         timeline.add_event(ev)
         await pilot.pause()
         assert timeline._table is not None
+        assert timeline._row_count == 1
         rows = list(timeline._table.rows.keys())
-        assert len(rows) >= 1
-        row_key = rows[-1]
-        tool_cell = str(timeline._table.get_cell_at((timeline._row_index(row_key), 1)))
-        assert tool_cell.startswith("▶ "), f"Expected '▶ ' prefix, got: {tool_cell!r}"
+        row_key = rows[0]
+        idx = timeline._row_index(row_key)
+        turn_cell = str(timeline._table.get_cell_at((idx, 1)))
+        prompt_cell = str(timeline._table.get_cell_at((idx, 2)))
+        tools_cell = str(timeline._table.get_cell_at((idx, 3)))
+        dur_cell = str(timeline._table.get_cell_at((idx, 4)))
+        assert turn_cell == "Turn 1", f"turn col: {turn_cell!r}"
+        assert "hello world" in prompt_cell, f"prompt col: {prompt_cell!r}"
+        assert tools_cell == "0", f"tools col: {tools_cell!r}"
+        assert dur_cell == "LIVE", f"dur col: {dur_cell!r}"
 
 
 @pytest.mark.asyncio
-async def test_tool_result_adds_completion_row(tmp_path: Path) -> None:
-    """tool_result should add a second completion row with '✓' prefix."""
+async def test_tool_use_increments_turn_tool_count(tmp_path: Path) -> None:
+    """tool_use events after a turn row must increment the 'tools' cell count."""
     from agentlens.app import AgentlensApp
 
     app = AgentlensApp(
@@ -216,29 +208,25 @@ async def test_tool_result_adds_completion_row(tmp_path: Path) -> None:
         await pilot.pause()
         timeline = app._timeline
         assert timeline is not None
-        use_ev = _make_event(tool_name="Bash", tool_use_id="tid-comp")
-        timeline.add_event(use_ev)
-        result_ev = _make_result_event(tool_use_id="tid-comp")
-        timeline.add_event(result_ev)
+        # Add a turn row first
+        timeline.add_event(_make_user_message_event(text="start"))
+        # Add 3 tool_use events
+        for i in range(3):
+            timeline.add_event(_make_event(tool_name="Bash", tool_use_id=f"tid-count-{i}"))
         await pilot.pause()
         assert timeline._table is not None
+        # Only 1 turn row should exist
+        assert timeline._row_count == 1
         rows = list(timeline._table.rows.keys())
-        assert len(rows) == 2, f"Expected 2 rows, got {len(rows)}"
-        # First row: start row with ▶ prefix, status updated to ok
-        start_tool = str(timeline._table.get_cell_at((0, 1)))
-        start_status = str(timeline._table.get_cell_at((0, 3)))
-        assert start_tool == "▶ Bash", f"Start row tool: {start_tool!r}"
-        assert start_status == "ok", f"Start row status: {start_status!r}"
-        # Second row: completion row with ✓ prefix
-        end_tool = str(timeline._table.get_cell_at((1, 1)))
-        end_status = str(timeline._table.get_cell_at((1, 3)))
-        assert end_tool == "✓ Bash", f"Completion row tool: {end_tool!r}"
-        assert end_status == "ok", f"Completion row status: {end_status!r}"
+        row_key = rows[0]
+        idx = timeline._row_index(row_key)
+        tools_cell = str(timeline._table.get_cell_at((idx, 3)))
+        assert tools_cell == "3", f"Expected tools='3', got: {tools_cell!r}"
 
 
 @pytest.mark.asyncio
-async def test_completion_row_has_end_timestamp(tmp_path: Path) -> None:
-    """Completion row timestamp should be the result's ts, not the start's."""
+async def test_turn_duration_computed_on_next_turn(tmp_path: Path) -> None:
+    """When turn 2 starts, turn 1's 'dur' cell should be updated to NmSSs format."""
     from agentlens.app import AgentlensApp
 
     app = AgentlensApp(
@@ -246,45 +234,20 @@ async def test_completion_row_has_end_timestamp(tmp_path: Path) -> None:
         state_dir_override=tmp_path / "state-absent",
     )
     (tmp_path / "empty.jsonl").write_text("")
-    t1 = datetime(2025, 1, 15, 14, 2, 1, tzinfo=timezone.utc)
-    t2 = datetime(2025, 1, 15, 14, 2, 15, tzinfo=timezone.utc)
+    t1 = datetime(2025, 1, 15, 14, 0, 0, tzinfo=timezone.utc)
+    t2 = datetime(2025, 1, 15, 14, 1, 35, tzinfo=timezone.utc)  # 95 seconds later
     async with app.run_test() as pilot:
         await pilot.pause()
         timeline = app._timeline
         assert timeline is not None
-        use_ev = _make_event(tool_name="Bash", tool_use_id="tid-ts", ts=t1)
-        timeline.add_event(use_ev)
-        result_ev = _make_result_event(tool_use_id="tid-ts", ts=t2)
-        timeline.add_event(result_ev)
+        timeline.add_event(_make_user_message_event(text="turn one", ts=t1))
+        timeline.add_event(_make_user_message_event(text="turn two", ts=t2))
         await pilot.pause()
         assert timeline._table is not None
+        assert timeline._row_count == 2
         rows = list(timeline._table.rows.keys())
-        assert len(rows) == 2
-        ts1 = str(timeline._table.get_cell_at((0, 0)))
-        ts2 = str(timeline._table.get_cell_at((1, 0)))
-        assert ts1 == "14:02:01", f"Start ts: {ts1!r}"
-        assert ts2 == "14:02:15", f"End ts: {ts2!r}"
-
-
-@pytest.mark.asyncio
-async def test_orphan_result_has_completion_prefix(tmp_path: Path) -> None:
-    """Orphan tool_result (no prior tool_use) should have '✓ ' prefix."""
-    from agentlens.app import AgentlensApp
-
-    app = AgentlensApp(
-        session_override=tmp_path / "empty.jsonl",
-        state_dir_override=tmp_path / "state-absent",
-    )
-    (tmp_path / "empty.jsonl").write_text("")
-    async with app.run_test() as pilot:
-        await pilot.pause()
-        timeline = app._timeline
-        assert timeline is not None
-        result_ev = _make_result_event(tool_use_id="tid-orphan")
-        timeline.add_event(result_ev)
-        await pilot.pause()
-        assert timeline._table is not None
-        rows = list(timeline._table.rows.keys())
-        assert len(rows) == 1
-        tool_cell = str(timeline._table.get_cell_at((0, 1)))
-        assert tool_cell.startswith("✓ "), f"Expected '✓ ' prefix, got: {tool_cell!r}"
+        turn1_key = rows[0]
+        idx = timeline._row_index(turn1_key)
+        dur_cell = str(timeline._table.get_cell_at((idx, 4)))
+        # 95 seconds = 1m35s
+        assert dur_cell == "1m35s", f"Expected '1m35s', got: {dur_cell!r}"

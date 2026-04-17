@@ -1,4 +1,4 @@
-"""TimelinePanel — DataTable of tool_use / tool_result events."""
+"""TimelinePanel — DataTable of turn markers."""
 
 from __future__ import annotations
 
@@ -14,8 +14,6 @@ from ..graph_model import _is_real_user_prompt
 from ..messages import HarnessEventMessage
 
 log = logging.getLogger(__name__)
-
-MAX_PENDING = 2000
 
 
 def _sanitize_cell(s: object) -> str:
@@ -34,12 +32,10 @@ class TimelinePanel(Container):
         super().__init__(id=id)
         self._table: DataTable[Any] | None = None
         self._placeholder: Static | None = None
-        self._pending_use: dict[str, float] = {}  # tool_use_id -> ts_epoch
         self._row_agent: dict[Any, str | None] = {}  # row_key -> agent_id
-        self._row_message: dict[Any, str | None] = {}
-        self._tool_use_row: dict[str, Any] = {}  # tool_use_id -> row_key
-        self._row_input: dict[Any, str] = {}  # row_key -> input preview
-        self._pending_tool_name: dict[str, str] = {}  # tool_use_id -> raw tool_name
+        self._turn_tool_count: dict[int, int] = {}   # turn_num -> running tool count
+        self._turn_start_ts: dict[int, float] = {}   # turn_num -> epoch timestamp
+        self._turn_row_key: dict[int, Any] = {}       # turn_num -> DataTable row_key
         self._updating = False
         self._row_count = 0
         self.max_rows = max_rows
@@ -67,7 +63,7 @@ class TimelinePanel(Container):
 
     def on_mount(self) -> None:
         assert self._table is not None
-        self._table.add_columns("ts", "tool", "agent", "status", "dur_ms")
+        self._table.add_columns("ts", "turn", "prompt", "tools", "dur")
         # Watch the app reactive for reverse cross-highlight.
         try:
             self.watch(self.app, "selected_agent_id", self._on_app_agent_changed)
@@ -98,103 +94,19 @@ class TimelinePanel(Container):
         # leave them alone.
         was_at_bottom = self._was_at_bottom()
         if ev.type == EventType.tool_use:
-            tid = ev.tool_use_id or ""
-            raw_tool = ev.tool_name or "?"
-            ts_str = ev.ts.strftime("%H:%M:%S")
-            row_key = self._table.add_row(
-                ts_str,
-                _sanitize_cell("▶ " + raw_tool),
-                _sanitize_cell((ev.agent_id or "-")[:20]),
-                "running",
-                "-",
-            )
-            self._row_count += 1
-            self._row_agent[row_key] = ev.agent_id
-            self._row_message[row_key] = ev.message_id
-            if tid:
-                self._pending_tool_name[tid] = raw_tool
-                if len(self._pending_tool_name) > MAX_PENDING:
-                    oldest = next(iter(self._pending_tool_name))
-                    del self._pending_tool_name[oldest]
-                self._tool_use_row[tid] = row_key
-                if len(self._tool_use_row) > MAX_PENDING:
-                    oldest_key = next(iter(self._tool_use_row))
-                    del self._tool_use_row[oldest_key]
-                self._pending_use[tid] = ev.ts.timestamp()
-                # Evict oldest if cap exceeded.
-                if len(self._pending_use) > MAX_PENDING:
-                    oldest_key = next(iter(self._pending_use))
-                    del self._pending_use[oldest_key]
-                    log.debug("pending_use cap hit: evicting %s", oldest_key)
-            # Store input preview for modal.
-            inp = ev.payload.get("input")
-            input_preview = ""
-            if isinstance(inp, dict):
-                for key in ("command", "path", "file_path", "pattern", "description", "subagent_type", "skill"):
-                    v = inp.get(key)
-                    if isinstance(v, str) and v:
-                        input_preview = v
-                        break
-                if not input_preview:
-                    input_preview = str(inp)[:120]
-            elif inp is not None:
-                input_preview = str(inp)[:120]
-            self._row_input[row_key] = input_preview
-            # Evict oldest _row_input if cap exceeded.
-            if len(self._row_input) > MAX_PENDING:
-                oldest_key = next(iter(self._row_input))
-                del self._row_input[oldest_key]
-            self._hide_placeholder()
-            self._enforce_cap()
-            if was_at_bottom:
-                self._scroll_to_end()
+            # No row added. Increment tool count for current turn.
+            if self._turn_counter > 0:
+                turn_num = self._turn_counter
+                self._turn_tool_count[turn_num] = self._turn_tool_count.get(turn_num, 0) + 1
+                rk = self._turn_row_key.get(turn_num)
+                if rk is not None:
+                    try:
+                        idx = self._row_index(rk)
+                        self._table.update_cell_at((idx, 3), str(self._turn_tool_count[turn_num]))
+                    except Exception:
+                        pass
         elif ev.type == EventType.tool_result:
-            tid = ev.tool_use_id or ""
-            if tid and tid in self._tool_use_row:
-                row_key = self._tool_use_row[tid]
-                started = self._pending_use.pop(tid, None)
-                dur_ms = "-"
-                if started is not None:
-                    dur_ms = str(max(0, int((ev.ts.timestamp() - started) * 1000)))
-                status = "err" if ev.is_error else "ok"
-                try:
-                    self._table.update_cell_at((self._row_index(row_key), 3), status)
-                    self._table.update_cell_at((self._row_index(row_key), 4), dur_ms)
-                except Exception:
-                    pass
-                # Add a completion row at the current (result) timestamp.
-                end_ts = ev.ts.strftime("%H:%M:%S")
-                tool_name = self._pending_tool_name.pop(tid, "?")
-                end_agent = self._row_agent.get(row_key, "-")
-                completion_row_key = self._table.add_row(
-                    end_ts,
-                    _sanitize_cell("✓ " + tool_name),
-                    _sanitize_cell((str(end_agent) if end_agent else "-")[:20]),
-                    status,
-                    dur_ms,
-                )
-                self._row_count += 1
-                self._row_agent[completion_row_key] = end_agent
-                self._row_message[completion_row_key] = self._row_message.get(row_key)
-                self._row_input[completion_row_key] = self._row_input.get(row_key, "")
-                self._enforce_cap()
-                if was_at_bottom:
-                    self._scroll_to_end()
-            else:
-                # Orphan result — still surface it as a row.
-                ts_str = ev.ts.strftime("%H:%M:%S")
-                self._table.add_row(
-                    ts_str,
-                    _sanitize_cell("✓ result"),
-                    (ev.agent_id or "-")[:20],
-                    "err" if ev.is_error else "ok",
-                    "-",
-                )
-                self._row_count += 1
-                self._hide_placeholder()
-                self._enforce_cap()
-                if was_at_bottom:
-                    self._scroll_to_end()
+            pass  # No rows in turn-only mode.
         elif ev.type == EventType.user_message:
             # Must match graph_model's turn boundary criteria exactly:
             # skip subagent user rows AND system-injected messages.
@@ -203,18 +115,36 @@ class TimelinePanel(Container):
             if _is_real_user_prompt(ev):
                 self._turn_counter += 1
                 turn_num = self._turn_counter
-                prompt = str(ev.payload.get("text", ""))[:35]
-                marker_text = f"=== Turn {turn_num}: {prompt} ==="
+                prompt = str(ev.payload.get("text", ""))[:40]
                 ts_str = ev.ts.strftime("%H:%M:%S")
+                ts_epoch = ev.ts.timestamp()
+
+                # Finalize previous turn's duration
+                if turn_num > 1:
+                    prev = turn_num - 1
+                    prev_rk = self._turn_row_key.get(prev)
+                    prev_start = self._turn_start_ts.get(prev)
+                    if prev_rk is not None and prev_start is not None:
+                        dur_secs = max(0, int(ts_epoch - prev_start))
+                        dur_str = f"{dur_secs // 60}m{dur_secs % 60:02d}s"
+                        try:
+                            idx = self._row_index(prev_rk)
+                            self._table.update_cell_at((idx, 4), dur_str)
+                        except Exception:
+                            pass
+
                 row_key = self._table.add_row(
                     ts_str,
-                    _sanitize_cell(marker_text),
-                    "",
-                    "",
-                    "",
+                    f"Turn {turn_num}",
+                    _sanitize_cell(prompt),
+                    "0",
+                    "LIVE",
                 )
                 self._row_count += 1
                 self._row_agent[row_key] = f"__turn:{turn_num}"
+                self._turn_tool_count[turn_num] = 0
+                self._turn_start_ts[turn_num] = ts_epoch
+                self._turn_row_key[turn_num] = row_key
                 self._hide_placeholder()
                 self._enforce_cap()
                 if was_at_bottom:
@@ -237,7 +167,6 @@ class TimelinePanel(Container):
                 self._table.remove_row(first_key)
                 self._row_count -= 1
                 self._row_agent.pop(first_key, None)
-                self._row_message.pop(first_key, None)
             except Exception:
                 break
 
@@ -409,7 +338,7 @@ class TimelinePanel(Container):
         0-indexed ``turn_index`` used by graph_model/FlowRecord.
 
         Uses the DataTable's row_key lookup (not dict order) so it is
-        robust against row deletions from MAX_PENDING FIFO eviction.
+        robust against row deletions from FIFO cap eviction.
         """
         if self._table is None:
             return None
@@ -437,12 +366,10 @@ class TimelinePanel(Container):
 
     def clear(self) -> None:
         """Reset the timeline to an empty state. Safe to call pre-mount."""
-        self._pending_use = {}
-        self._tool_use_row = {}
-        self._row_input = {}
         self._row_agent = {}
-        self._row_message = {}
-        self._pending_tool_name = {}
+        self._turn_tool_count = {}
+        self._turn_start_ts = {}
+        self._turn_row_key = {}
         self._updating = False
         self._row_count = 0
         self._scroll_pending = False
@@ -487,17 +414,3 @@ class TimelinePanel(Container):
         """Scroll to the last row (for LIVE mode return)."""
         self._scroll_to_end()
 
-    def get_selected_input_summary(self) -> str:
-        """Return the stored input preview for the currently-selected row, or ''."""
-        if self._table is None:
-            return ""
-        try:
-            row = self._table.cursor_row
-            # Find which row_key corresponds to the cursor row index.
-            keys = list(self._table.rows.keys())
-            if row < 0 or row >= len(keys):
-                return ""
-            row_key = keys[row]
-            return self._row_input.get(row_key, "")
-        except Exception:
-            return ""

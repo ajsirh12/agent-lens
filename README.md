@@ -30,9 +30,10 @@ nested subagent trees and parallel-instance views.
 
 - **Live tail** of the main Claude Code session JSONL via `watchfiles`
   (with stdlib polling fallback) — new events appear within ~1 second.
-- **Timeline panel**: scrollable DataTable of every tool_use /
-  tool_result event in the session, with cross-highlight to the
-  flowchart.
+- **Timeline panel**: scrollable DataTable of turn markers (ts /
+  Turn N / prompt preview / tool count / duration). Press Enter on
+  any row to open TurnSummaryScreen with the individual tool call
+  breakdown for that turn.
 - **Flowchart panel**: live directed graph of Agent/Task/Skill calls,
   with parent/child edges, (xN) duplicate counters, per-subagent
   tool breakdown badges (e.g. `Rd12 Ed5`), and color-coded status

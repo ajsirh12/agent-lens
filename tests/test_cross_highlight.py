@@ -11,24 +11,6 @@ from agentlens.app import AgentlensApp
 from agentlens.events import EventType, HarnessEvent
 
 
-def _spawn(aid: str) -> HarnessEvent:
-    return HarnessEvent(
-        type=EventType.agent_spawn,
-        ts=datetime.now(timezone.utc),
-        agent_id=aid,
-        payload={"label": aid, "status": "running"},
-    )
-
-
-def _tool(aid: str, idx: int) -> HarnessEvent:
-    return HarnessEvent(
-        type=EventType.tool_use,
-        ts=datetime.now(timezone.utc),
-        agent_id=aid,
-        payload={"tool_use_id": f"t{idx}", "tool_name": "Bash"},
-    )
-
-
 @pytest.mark.asyncio
 async def test_forward_timeline_cursor_to_app_reactive(tmp_path: Path) -> None:
     app = AgentlensApp(
@@ -39,21 +21,27 @@ async def test_forward_timeline_cursor_to_app_reactive(tmp_path: Path) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         timeline = app._timeline
-        flowchart = app._flowchart
-        assert timeline is not None and flowchart is not None
+        assert timeline is not None
 
-        flowchart.add_event(_spawn("agent-A"))
-        flowchart.add_event(_spawn("agent-B"))
-        timeline.add_event(_tool("agent-A", 0))
-        timeline.add_event(_tool("agent-B", 1))
+        # Add two turn rows via user_message events
+        for i, text in enumerate(["first turn", "second turn"]):
+            ev = HarnessEvent(
+                type=EventType.user_message,
+                ts=datetime.now(timezone.utc),
+                agent_id=None,
+                payload={"text": text, "role": "user"},
+            )
+            timeline.add_event(ev)
         await pilot.pause()
 
-        # Activate timeline panel so j/k route to the DataTable cursor.
         app.active_panel = "timeline"
-        # Move cursor down once (onto row 1 = agent-B).
+        # Move cursor down onto row 1 (Turn 2)
         await pilot.press("j")
         await pilot.pause()
-        assert app.selected_agent_id in {"agent-A", "agent-B"}
+        # selected_agent_id should be "__turn:2" (turn marker)
+        assert app.selected_agent_id == "__turn:2", (
+            f"Expected '__turn:2', got: {app.selected_agent_id!r}"
+        )
 
 
 @pytest.mark.asyncio
@@ -66,25 +54,24 @@ async def test_reverse_app_reactive_to_timeline(tmp_path: Path) -> None:
     async with app.run_test() as pilot:
         await pilot.pause()
         timeline = app._timeline
-        flowchart = app._flowchart
-        assert timeline is not None and flowchart is not None
+        assert timeline is not None
 
-        flowchart.add_event(_spawn("agent-X"))
-        flowchart.add_event(_spawn("agent-Y"))
-        timeline.add_event(_tool("agent-X", 0))
-        timeline.add_event(_tool("agent-Y", 1))
-        timeline.add_event(_tool("agent-X", 2))
+        # Add a turn row
+        ev = HarnessEvent(
+            type=EventType.user_message,
+            ts=datetime.now(timezone.utc),
+            agent_id=None,
+            payload={"text": "hello", "role": "user"},
+        )
+        timeline.add_event(ev)
         await pilot.pause()
 
-        # Programmatically set the reactive; timeline watcher should move
-        # cursor onto a row with agent_id == "agent-X".
+        # Setting an agent_id reactive should NOT crash (graceful no-op)
+        # because turn-only mode has no agent_id rows to match
         app.selected_agent_id = "agent-X"
         await pilot.pause()
-        # Cursor should be on a row whose stored agent_id == agent-X.
+        # Cursor should still be in a valid position (not raised an exception)
         assert timeline._table is not None
-        row_idx = timeline._table.cursor_row
-        row_keys = list(timeline._row_agent.keys())
-        assert 0 <= row_idx < len(row_keys)
-        # Verify some row maps to agent-X (best-effort — cursor should be one of them).
-        x_rows = [rk for rk, aid in timeline._row_agent.items() if aid == "agent-X"]
-        assert len(x_rows) >= 1
+        # The cursor may or may not have moved; the important thing is no crash
+        # and the timeline still has its turn row
+        assert timeline._row_count == 1
