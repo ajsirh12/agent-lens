@@ -12,7 +12,7 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import ScrollableContainer, Vertical
-from textual.screen import ModalScreen
+from textual.screen import Screen
 from textual.widgets import DataTable, Static
 
 _TOP_N_TOOL = 8
@@ -355,16 +355,16 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
     return lines
 
 
-class TurnSummaryScreen(ModalScreen[None]):
-    """Modal showing a summary of a single turn's orchestration."""
+class TurnSummaryScreen(Screen[None]):
+    """Full-screen summary of a single turn's orchestration."""
 
     DEFAULT_CSS = """
-    #turn-summary-scroll {
-        width: 80;
-        max-width: 95%;
-        max-height: 85%;
-        border: thick $accent;
+    TurnSummaryScreen {
         background: $panel;
+    }
+    #turn-summary-scroll {
+        width: 100%;
+        height: 100%;
         padding: 1 2;
     }
     #turn-tool-timeline {
