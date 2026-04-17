@@ -8,6 +8,14 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **TurnSummaryScreen independent scroll sections** — Split the single scrollable body into three independent scroll regions (Stats / Token Usage / Tool Timeline), so token data is always visible regardless of Agents/Skills list length.
+
+---
+
 ## [0.9.1] - 2026-04-15
 
 Fix: flow mode P1 — parallel/sequential spawns from same turn now render as fork (main→{A,B,C}) instead of vertical chain (A→B→C). Temporal predecessor inference removed; all top-level agents are now ROOT children in flow mode. 273 tests passing.

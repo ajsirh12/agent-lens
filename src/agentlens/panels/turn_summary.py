@@ -147,8 +147,8 @@ def _build_header_lines(s: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _build_body_lines(s: dict[str, Any]) -> list[str]:
-    """Build the scrollable body lines: agent time, agents, tools, tokens, etc."""
+def _build_agents_lines(s: dict[str, Any]) -> list[str]:
+    """Build agents section: agent time + Agents/Skills list."""
     lines: list[str] = []
 
     duration = float(s.get("duration_s", 0.0))
@@ -164,16 +164,12 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
         )
     lines.append("")
 
-    # --- Agents / Skills ---
     agents = s.get("agents", []) or []
     if not agents:
         lines.append("(no agent or skill invocations)")
     else:
         lines.append("[bold]Agents / Skills[/bold]")
-        for i, a in enumerate(agents):
-            if i >= 30:
-                lines.append(f"  ... +{len(agents) - 30} more")
-                break
+        for a in agents:
             label = _sanitize(a.get("label", ""))
             desc = _sanitize(a.get("description", ""))
             node_type = str(a.get("node_type", ""))
@@ -196,39 +192,37 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
                 f"[{dur}]{bg_tag}{status_tag}"
             )
 
-    # --- Tool Usage section ---
+    return lines
+
+
+def _build_tool_usage_lines(s: dict[str, Any]) -> list[str]:
+    """Build tool usage section: Tool Usage + MCP + Hooks."""
+    lines: list[str] = []
+
+    # --- Tool Usage ---
     tool_usage = s.get("tool_usage", []) or []
     tool_total = int(s.get("tool_total", 0))
     if tool_usage and tool_total > 0:
-        lines.append("")
         lines.append(f"[bold]Tool Usage ({tool_total} calls)[/bold]")
-        shown = tool_usage[:_TOP_N_TOOL]
-        for item in shown:
+        for item in tool_usage:
             name = _trunc(_sanitize(item.get("name", "")), 14)
             count = int(item.get("count", 0))
             lines.append(f"  {name:<14} \u00d7{count}")
-        overflow = len(tool_usage) - len(shown)
-        if overflow > 0:
-            lines.append(f"  ... +{overflow} more")
 
-    # --- MCP section ---
+    # --- MCP ---
     mcp_usage = s.get("mcp_usage", []) or []
     mcp_total = int(s.get("mcp_total", 0))
     if mcp_usage and mcp_total > 0:
         lines.append("")
         lines.append(f"[bold]MCP ({mcp_total} calls)[/bold]")
-        shown_mcp = mcp_usage[:_TOP_N_MCP]
-        for item in shown_mcp:
+        for item in mcp_usage:
             server = _sanitize(item.get("server", ""))
             tool_name = _sanitize(item.get("tool", ""))
             count = int(item.get("count", 0))
             display = _mcp_display(server, tool_name)
             lines.append(f"  {display:<38} \u00d7{count}")
-        mcp_overflow = len(mcp_usage) - len(shown_mcp)
-        if mcp_overflow > 0:
-            lines.append(f"  ... +{mcp_overflow} more")
 
-    # --- Hooks section ---
+    # --- Hooks ---
     hook_usage = s.get("hook_usage", []) or []
     hook_runs = int(s.get("hook_runs", s.get("hook_total", 0)))
     hook_errors = int(s.get("hook_errors_total", s.get("hook_error_total", 0)))
@@ -236,7 +230,8 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
     hooks_configured = s.get("hooks_configured")
     show_hooks = hook_runs > 0 or hooks_configured is True
     if show_hooks:
-        lines.append("")
+        if lines:
+            lines.append("")
         if hook_errors > 0:
             err_part = f", [red]{hook_errors} errors[/red]"
         else:
@@ -250,8 +245,7 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
         if hook_runs == 0:
             lines.append("  [dim](no hook fired this turn)[/dim]")
         else:
-            shown_hooks = hook_usage[:_TOP_N_HOOK]
-            for item in shown_hooks:
+            for item in hook_usage:
                 event_name = _trunc(_sanitize(item.get("event", "Stop")), 14)
                 raw_script = _sanitize(item.get("script", ""))
                 script = os.path.basename(raw_script) or "(anonymous)"
@@ -264,11 +258,19 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
                 lines.append(
                     f"  {event_name:<14} {script:<24} \u00d7{count}{err_tag}"
                 )
-            hook_overflow = len(hook_usage) - len(shown_hooks)
-            if hook_overflow > 0:
-                lines.append(f"  ... +{hook_overflow} more")
 
-    # --- Token Usage section ---
+    return lines
+
+
+def _build_stats_lines(s: dict[str, Any]) -> list[str]:
+    """Backward-compatible wrapper: agents + tool usage."""
+    return _build_agents_lines(s) + _build_tool_usage_lines(s)
+
+
+def _build_token_lines(s: dict[str, Any]) -> list[str]:
+    """Build token usage section lines."""
+    lines: list[str] = []
+
     tt = s.get("token_total") or {}
     total_sum = sum(int(tt.get(k, 0) or 0) for k in ("input", "output", "cache_read", "cache_create"))
     if total_sum > 0:
@@ -296,13 +298,9 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
                     str(n.get("label", "")),
                 ),
             )
-            shown_nodes = nodes_sorted[:_TOP_N_TOKEN]
-            for node in shown_nodes:
+            for node in nodes_sorted:
                 prefix = "[agent]" if node.get("node_type") == "agent" else "[skill]"
                 lines.append(_fmt_token_row(f"{prefix} {node.get('label', '')}", node.get("tokens") or {}))
-            extra = len(nodes_sorted) - len(shown_nodes)
-            if extra > 0:
-                lines.append(f"  [dim]... +{extra} more[/dim]")
 
         if skill_tree:
             skills_filtered = [
@@ -316,10 +314,9 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
                     + int(((sk.get("total") or {}).get("tokens") or {}).get("output", 0) or 0)
                 ),
             )
-            skills_visible = skills_sorted[:_TOP_N_SKILL]
-            if skills_visible:
+            if skills_sorted:
                 lines.append("")
-                for sk in skills_visible:
+                for sk in skills_sorted:
                     skill_label = _sanitize(sk.get("label") or sk.get("skill_node_id") or "")
                     skill_tokens = (sk.get("total") or {}).get("tokens") or {}
                     lines.append(_fmt_token_row(f"[skill] {skill_label}", skill_tokens, indent=2))
@@ -335,9 +332,6 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
                     for ag in agents_sorted:
                         ag_label = _sanitize(ag.get("label") or ag.get("node_id") or "")
                         lines.append(_fmt_token_row(f"[agent] {ag_label}", ag.get("tokens") or {}, indent=4))
-            skill_overflow = len(skills_sorted) - len(skills_visible)
-            if skill_overflow > 0:
-                lines.append(f"  [dim]... +{skill_overflow} more skills[/dim]")
 
         # --- Standalone agents ---
         standalone_raw = standalone_raw_check
@@ -359,14 +353,16 @@ def _build_body_lines(s: dict[str, Any]) -> list[str]:
                     for k in subtotal:
                         subtotal[k] += int(t.get(k, 0) or 0)
                 lines.append(_fmt_token_row(f"agents ({len(standalone_sorted)})", subtotal, dim=True, indent=2))
-            shown_standalone = standalone_sorted[:_TOP_N_AGENT]
-            for ag in shown_standalone:
+            for ag in standalone_sorted:
                 ag_label = _sanitize(ag.get("label") or ag.get("node_id") or "")
                 lines.append(_fmt_token_row(f"[agent] {ag_label}", ag.get("tokens") or {}, indent=2))
-            agent_overflow = len(standalone_sorted) - len(shown_standalone)
-            if agent_overflow > 0:
-                lines.append(f"  [dim]... +{agent_overflow} more agents[/dim]")
 
+    return lines
+
+
+def _build_body_lines(s: dict[str, Any]) -> list[str]:
+    """Backward-compatible wrapper: stats + tokens + footer."""
+    lines = _build_stats_lines(s) + _build_token_lines(s)
     lines.append("")
     lines.append("(Esc / Enter to close)")
     return lines
@@ -398,14 +394,36 @@ class TurnSummaryScreen(Screen[None]):
         background: $panel;
         border-bottom: solid $accent;
     }
-    #turn-summary-scroll {
+    #turn-sections {
         width: 100%;
         height: 1fr;
-        padding: 1 2;
+    }
+    #turn-section-tokens {
+        height: 1fr;
+        min-height: 3;
+        padding: 0 2;
+        border-bottom: solid $accent-darken-2;
+    }
+    #turn-section-agents {
+        height: 1fr;
+        min-height: 3;
+        padding: 0 2;
+        border-bottom: solid $accent-darken-2;
+    }
+    #turn-section-stats {
+        height: 1fr;
+        min-height: 3;
+        padding: 0 2;
+        border-bottom: solid $accent-darken-2;
+    }
+    #turn-section-timeline {
+        height: 1fr;
+        min-height: 3;
+        padding: 0 2;
     }
     #turn-tool-timeline {
-        max-height: 15;
-        margin-top: 1;
+        height: 1fr;
+        margin-top: 0;
     }
     """
 
@@ -419,57 +437,71 @@ class TurnSummaryScreen(Screen[None]):
         from datetime import datetime, timezone
 
         header_lines = _build_header_lines(self.summary)
-        body_lines = _build_body_lines(self.summary)
+        token_lines = _build_token_lines(self.summary)
+        agents_lines = _build_agents_lines(self.summary)
+        tool_usage_lines = _build_tool_usage_lines(self.summary)
         tool_timeline = self.summary.get("tool_timeline", []) or []
 
         yield Static("\n".join(header_lines), id="turn-summary-header")
 
-        with ScrollableContainer(id="turn-summary-scroll"):
-            with Vertical(id="turn-summary-body"):
-                for line in body_lines:
-                    if line in (
-                        "(no agent or skill invocations)",
-                        "(Esc / Enter to close)",
-                    ):
+        with Vertical(id="turn-sections"):
+            # Section A: Token Usage
+            with ScrollableContainer(id="turn-section-tokens"):
+                if token_lines:
+                    for line in token_lines:
+                        yield Static(line)
+                else:
+                    yield Static("[dim](no token data)[/dim]", classes="placeholder")
+
+            # Section B: Agents / Skills
+            with ScrollableContainer(id="turn-section-agents"):
+                for line in agents_lines:
+                    if line == "(no agent or skill invocations)":
                         yield Static(line, classes="placeholder")
                     else:
                         yield Static(line)
 
-            # --- Tool Timeline DataTable ---
+            # Section C: Tool Usage + MCP + Hooks
+            with ScrollableContainer(id="turn-section-stats"):
+                if tool_usage_lines:
+                    for line in tool_usage_lines:
+                        yield Static(line)
+                else:
+                    yield Static("[dim](no tool usage)[/dim]", classes="placeholder")
+
+            # Section C: Tool Timeline (conditional)
             if tool_timeline:
-                yield Static(
-                    f"[bold]Tool Calls ({len(tool_timeline)} events)[/bold]"
-                )
-                table = DataTable(id="turn-tool-timeline")
-                table.add_columns("time", "tool", "agent", "sts", "dur")
-                table.cursor_type = "row"
-                table.zebra_stripes = True
-                for evt in tool_timeline[:_TOP_N_TIMELINE]:
-                    try:
-                        ts = evt.get("ts", 0.0)
-                        time_str = datetime.fromtimestamp(
-                            ts, tz=timezone.utc
-                        ).strftime("%H:%M:%S")
-                    except Exception:
-                        time_str = "-"
-                    name = _trunc(str(evt.get("name", "")), 14)
-                    agent = _trunc(str(evt.get("agent_id", "") or "-"), 16)
-                    status = evt.get("status", "")
-                    if status == "done":
-                        sts = "ok"
-                    elif status == "error":
-                        sts = "err"
-                    elif status == "running":
-                        sts = "run"
-                    else:
-                        sts = str(status)[:3]
-                    dur_ms = evt.get("duration_ms")
-                    dur = _fmt_ms(dur_ms) if dur_ms is not None else "-"
-                    table.add_row(time_str, name, agent, sts, dur)
-                overflow = len(tool_timeline) - _TOP_N_TIMELINE
-                if overflow > 0:
-                    table.add_row("", f"... +{overflow} more", "", "", "")
-                yield table
+                with Vertical(id="turn-section-timeline"):
+                    yield Static(f"[bold]Tool Calls ({len(tool_timeline)} events)[/bold]")
+                    table = DataTable(id="turn-tool-timeline")
+                    table.add_columns("time", "tool", "agent", "sts", "dur")
+                    table.cursor_type = "row"
+                    table.zebra_stripes = True
+                    for evt in tool_timeline:
+                        try:
+                            ts = evt.get("ts", 0.0)
+                            time_str = datetime.fromtimestamp(
+                                ts, tz=timezone.utc
+                            ).strftime("%H:%M:%S")
+                        except Exception:
+                            time_str = "-"
+                        name = _trunc(str(evt.get("name", "")), 14)
+                        agent = _trunc(str(evt.get("agent_id", "") or "-"), 16)
+                        status = evt.get("status", "")
+                        if status == "done":
+                            sts = "ok"
+                        elif status == "error":
+                            sts = "err"
+                        elif status == "running":
+                            sts = "run"
+                        else:
+                            sts = str(status)[:3]
+                        dur_ms = evt.get("duration_ms")
+                        dur = _fmt_ms(dur_ms) if dur_ms is not None else "-"
+                        table.add_row(time_str, name, agent, sts, dur)
+                    yield table
+
+            yield Static("(Esc / Enter to close)", classes="placeholder")
 
     def action_dismiss(self) -> None:  # type: ignore[override]
         self.dismiss(None)

@@ -12,6 +12,8 @@ from agentlens.panels.turn_summary import (
     _build_lines,
     _build_header_lines,
     _build_body_lines,
+    _build_stats_lines,
+    _build_token_lines,
     _fmt_token_summary,
     _fmt_ms,
     _fmt_tokens,
@@ -235,7 +237,8 @@ def test_tool_usage_section_absent_when_empty() -> None:
     assert "Tool Usage" not in combined
 
 
-def test_tool_usage_overflow_row() -> None:
+def test_tool_usage_all_items_shown() -> None:
+    """All tool usage items are shown (no cap/overflow truncation)."""
     items = [{"name": f"Tool{i}", "count": 10 - i} for i in range(10)]
     summary = {
         "index": 0,
@@ -258,7 +261,10 @@ def test_tool_usage_overflow_row() -> None:
         "hooks_configured": False,
     }
     combined = _combined(summary)
-    assert "+2 more" in combined
+    # All 10 items shown — no truncation
+    for i in range(10):
+        assert f"Tool{i}" in combined
+    assert "more" not in combined
 
 
 def test_mcp_section_present_when_data_exists() -> None:
@@ -561,8 +567,8 @@ def test__token_section_shows_when_nonzero() -> None:
     assert "Token Usage" in combined
 
 
-def test__token_overflow() -> None:
-    """12 nodes → only first 10 shown, '+2 more' overflow line rendered."""
+def test__token_all_nodes_shown() -> None:
+    """All 12 nodes shown — no cap/overflow truncation."""
     nodes = [
         {"label": f"agent{i}", "node_type": "agent",
          "tokens": {"input": 100 - i, "output": 10, "cache_read": 0, "cache_create": 0}}
@@ -573,7 +579,9 @@ def test__token_overflow() -> None:
         token_nodes=nodes,
     )
     combined = _combined(summary)
-    assert "+2 more" in combined
+    for i in range(12):
+        assert f"agent{i}" in combined
+    assert "more" not in combined
 
 
 def test__token_sort_order() -> None:
@@ -839,7 +847,7 @@ def test_tool_timeline_status_mapping() -> None:
 
 
 async def test_scrollable_container_present(tmp_path) -> None:
-    """ScrollableContainer with id='turn-summary-scroll' wraps the modal content."""
+    """ScrollableContainer sections are present in the modal content."""
     from agentlens.panels.turn_summary import TurnSummaryScreen
     from textual.app import App, ComposeResult
     from textual.containers import ScrollableContainer
@@ -856,8 +864,10 @@ async def test_scrollable_container_present(tmp_path) -> None:
         app.push_screen(screen)
         await pilot.pause()
         sc = screen.query(ScrollableContainer)
-        found = any(w.id == "turn-summary-scroll" for w in sc)
-        assert found, "ScrollableContainer(id='turn-summary-scroll') not found"
+        found_stats = any(w.id == "turn-section-stats" for w in sc)
+        found_tokens = any(w.id == "turn-section-tokens" for w in sc)
+        assert found_stats, "ScrollableContainer(id='turn-section-stats') not found"
+        assert found_tokens, "ScrollableContainer(id='turn-section-tokens') not found"
 
 
 def test_existing_sections_unchanged() -> None:
@@ -1068,6 +1078,92 @@ async def test_header_widget_present(tmp_path) -> None:
         # token summary must appear in header text
         header_text = str(header.render())
         assert "Tokens:" in header_text
-        # #turn-summary-scroll must also exist (scrollable body)
-        scroll = screen.query_one("#turn-summary-scroll")
-        assert scroll is not None
+        # #turn-sections must also exist (sectioned body)
+        sections = screen.query_one("#turn-sections")
+        assert sections is not None
+
+
+# --- Section scroll tests ---
+
+
+async def test_section_containers_present(tmp_path) -> None:
+    """#turn-section-stats and #turn-section-tokens containers exist."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from textual.app import App, ComposeResult
+    from textual.containers import ScrollableContainer
+
+    summary = _timeline_summary(tool_timeline=[
+        {"ts": 1700000000.0, "name": "Bash", "agent_id": "",
+         "tool_use_id": "t1", "status": "done", "duration_ms": 500},
+    ])
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+        app.push_screen(screen)
+        await pilot.pause()
+        stats = screen.query_one("#turn-section-stats", ScrollableContainer)
+        assert stats is not None
+        tokens = screen.query_one("#turn-section-tokens", ScrollableContainer)
+        assert tokens is not None
+
+
+def test_build_stats_lines_basic() -> None:
+    """_build_stats_lines() returns lines containing 'Agents / Skills'."""
+    summary = {
+        "index": 0,
+        "prompt": "test",
+        "duration_s": 5.0,
+        "agent_count": 1,
+        "skill_count": 0,
+        "error_count": 0,
+        "total_agent_duration_s": 3.0,
+        "end_ts": 5.0,
+        "agents": [
+            {"label": "planner", "description": "Plan work",
+             "node_type": "agent", "duration_s": 3.0,
+             "status": "done", "is_background": False}
+        ],
+    }
+    lines = _build_stats_lines(summary)
+    combined = "\n".join(lines)
+    assert "Agents / Skills" in combined
+
+
+def test_build_token_lines_basic() -> None:
+    """_build_token_lines() returns lines containing 'Token Usage' when token_total nonzero."""
+    summary = _token_summary(
+        token_total={"input": 100, "output": 50, "cache_read": 0, "cache_create": 0},
+    )
+    lines = _build_token_lines(summary)
+    combined = "\n".join(lines)
+    assert "Token Usage" in combined
+
+
+def test_build_body_lines_backward_compat() -> None:
+    """_build_body_lines() contains both stats and tokens sections."""
+    summary = {
+        "index": 0,
+        "prompt": "test",
+        "duration_s": 5.0,
+        "agent_count": 1,
+        "skill_count": 0,
+        "error_count": 0,
+        "total_agent_duration_s": 3.0,
+        "end_ts": 5.0,
+        "agents": [
+            {"label": "planner", "description": "Plan work",
+             "node_type": "agent", "duration_s": 3.0,
+             "status": "done", "is_background": False}
+        ],
+        "token_total": {"input": 100, "output": 50, "cache_read": 0, "cache_create": 0},
+    }
+    lines = _build_body_lines(summary)
+    combined = "\n".join(lines)
+    assert "Agents / Skills" in combined
+    assert "Token Usage" in combined
+    assert "(Esc / Enter to close)" in combined
