@@ -27,7 +27,7 @@ description: "실제 JSONL fixture를 기반으로 parser→graph_model→panel 
 - 불일치 3개 이상 → 리더에게 analyst 모델 승격 요청 (haiku → sonnet)
 - 출력: `_workspace/{slug}/01_5_schema_review.md`
 
-### Phase 3: 경계면 QA
+### Phase 3: 경계면 QA (2단계 검증)
 
 `tests/fixtures/`의 실제 JSONL 슬라이스로 엔드투엔드 replay하여 경계면 shape을 비교한다:
 
@@ -39,6 +39,21 @@ description: "실제 JSONL fixture를 기반으로 parser→graph_model→panel 
 - 각 모듈 완료 **직후** 점진적 실행 (incremental QA)
 - 존재 확인이 아니라 **경계면 shape 비교**가 핵심
 - 사용할 스킬: `replay-fixture-harness` (scripts/replay.py 실행)
+
+#### 2단계 검증 프로토콜 (iter 2+ 재검증 시)
+
+초회(iter 1)는 경계면 4곳 전체를 검증한다. iter 2 이후 재검증 시에는 2단계로 나눈다:
+
+**1단계 — 타겟 검증 (빠른 피드백):**
+- 이전 iter에서 실패했던 경계면만 재검증한다
+- `qa_iter_{n-1}.md`의 `## 실패 경계면` 섹션을 읽어 타겟을 결정한다
+- 1단계 fail → 즉시 `qa_iter_{n}.md` 작성, 구현 에이전트에 반환 (2단계 스킵)
+
+**2단계 — 회귀 검증 (전체 확인):**
+- 1단계 pass 후에만 실행한다
+- 나머지 경계면을 전부 검증하여 수정이 다른 곳을 깨뜨리지 않았는지 확인한다
+- 2단계 fail → 새 실패 경계면을 `qa_iter_{n}.md`에 기록
+- 2단계 pass → QA 통과
 
 ## 작업 원칙
 

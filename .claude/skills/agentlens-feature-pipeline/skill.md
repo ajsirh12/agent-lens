@@ -14,7 +14,7 @@ agentlens 에이전트 팀을 조율하여 조사→구현→검증→문서화 
 ### 재개 감지 (clear/compact 후 복구)
 
 ```
-1. .claude/_workspace/ 하위 디렉토리 목록 확인
+1. _workspace/ 하위 디렉토리 목록 확인
 2. 각 디렉토리에서 pipeline_status.md 존재 여부 확인
 3. pipeline_status.md가 있고 pipeline이 "agentlens-feature-pipeline"이며
    status가 "in_progress"인 경우:
@@ -123,19 +123,24 @@ Phase 2 완료 → `pipeline_status.md` 갱신: `current_phase: phase_3`, phase_
 **실패 시 재시도 (리더가 파일 읽고 라우팅):**
 
 ```
-iter 1:
-  - QA 에이전트: qa_iter_1.md 작성 (실패 경계면, 기대값, 실제값, 의심 원인, 수정 필요 파일)
-  - 리더: qa_iter_1.md 읽기 → 해당 구현 에이전트에 TaskCreate (기본 모델 유지, 실패 컨텍스트 포함)
+iter 1 (전체 검증):
+  - QA 에이전트: 경계면 4곳 전체 + pytest 전체 + ruff check
+  - qa_iter_1.md 작성 (실패 경계면, 실패 테스트, 기대값, 실제값, 의심 원인, 수정 필요 파일)
+  - 리더: qa_iter_1.md 읽기 → 해당 구현 에이전트에 TaskCreate (기본 모델 유지)
 
-iter 2:
-  - QA 에이전트: qa_iter_2.md 작성 (iter 1 요약 포함)
+iter 2 (2단계 검증):
+  - 1단계: 실패했던 경계면/테스트만 타겟 재검증 (빠른 피드백)
+    - fail → 즉시 qa_iter_2.md 작성, 구현 에이전트에 반환 (2단계 스킵)
+    - pass ↓
+  - 2단계: 나머지 경계면 + pytest 전체 (회귀 확인)
+    - fail → 새 실패를 qa_iter_2.md에 기록
+    - pass → QA 통과
   - 리더: qa_iter_2.md 읽기 → 실패한 구현 에이전트를 opus로 승격
   - 리더가 TaskUpdate(metadata: {model: "opus"}) 기록
-  - 리더: 해당 에이전트에 TaskCreate (opus 모델로)
 
-iter 3:
-  - QA 에이전트: qa_iter_3.md 작성 (iter 1+2 요약 포함)
-  - 리더: opus 강제, 마지막 TaskCreate
+iter 3 (2단계 검증):
+  - 동일 2단계 프로토콜 (타겟 → 회귀)
+  - opus 강제, 마지막 시도
 
 iter > 3:
   - QA 에이전트: _workspace/{slug}/escalation.md 작성
@@ -213,7 +218,7 @@ task_09_docs                  (doc-writer)    → deps: [task_08 PASS]
 
 파일 경로 규약:
 ```
-.claude/_workspace/{slug}/
+_workspace/{slug}/
 ├── pipeline_status.md          (오케스트레이터, Phase 0 생성 → 각 Phase 완료 시 갱신)
 ├── 01_schema_report.md
 ├── 01_5_schema_review.md

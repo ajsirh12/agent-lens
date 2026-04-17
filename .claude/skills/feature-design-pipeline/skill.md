@@ -26,7 +26,7 @@ description: "자연어 기능 요청을 구조화된 설계 문서로 변환하
 ### 재개 감지 (clear/compact 후 복구)
 
 ```
-1. .claude/_workspace/ 하위 디렉토리 목록 확인
+1. _workspace/ 하위 디렉토리 목록 확인
 2. 각 디렉토리에서 pipeline_status.md 존재 여부 확인
 3. pipeline_status.md가 있고 status가 "in_progress"인 경우:
    - 사용자에게 진행 중인 작업 목록 제시
@@ -217,7 +217,7 @@ task_06_user_review   (leader)                 → deps: [05 PASS]
 
 파일 경로 규약:
 ```
-.claude/_workspace/{slug}/
+_workspace/{slug}/
 ├── pipeline_status.md          (오케스트레이터, Phase 0 생성 → 각 Phase 완료 시 갱신)
 ├── design_01_requirements.md   (requirements-analyst)
 ├── design_02_impact.md         (impact-analyst)

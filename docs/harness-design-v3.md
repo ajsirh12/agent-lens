@@ -168,7 +168,7 @@ task_08_docs                  (doc-writer, haiku)     → deps: [task_07 통과]
 ### 6.4 파일 경로 규약
 
 ```
-.claude/_workspace/
+_workspace/
 ├── 01_schema_report.md
 ├── 01_5_schema_review.md
 ├── 02_panel_changes.md
@@ -194,14 +194,18 @@ success_criteria:
   - ruff check clean
 
 on_failure:
-  iter_1:
+  iter_1 (전체 검증):
+    - 경계면 4곳 전체 + pytest 전체 + ruff check
     - QA가 _workspace/qa_iter_1.md 에 실패 diff + 의심 원인 기록
     - 해당 구현 에이전트에 SendMessage (기본 모델 유지)
-  iter_2:
-    - _workspace/qa_iter_2.md (누적 컨텍스트 포함)
+  iter_2 (2단계 검증):
+    - 1단계: 실패했던 경계면/테스트만 타겟 재검증
+      - fail → 즉시 qa_iter_2.md 작성, 2단계 스킵
+      - pass → 2단계 진행
+    - 2단계: 나머지 경계면 + pytest 전체 (회귀 확인)
     - 실패한 구현 에이전트를 opus로 승격
-  iter_3:
-    - _workspace/qa_iter_3.md (전체 누적 컨텍스트)
+  iter_3 (2단계 검증):
+    - 동일 2단계 프로토콜 (타겟 → 회귀)
     - opus 강제, 마지막 시도
   iter_gt_3:
     - _workspace/escalation.md (3회 전체 이력 + 가설)
@@ -401,5 +405,5 @@ members:
 - [ ] 오케스트레이터: 재시도·에러·승격·스킵·시나리오
 - [ ] Phase 1.5 교차 검증 (1회, 루프 없음, 3개+ 승격)
 - [ ] QA 수정 금지 명시
-- [ ] `.claude/_workspace/` .gitignore
+- [ ] `_workspace/` .gitignore
 - [ ] skill.md 500줄 이내

@@ -44,6 +44,21 @@ Textual async 테스트 작성·실행 및 pytest/ruff 검증을 담당하는 �
 
 하나라도 실패하면 fail 판정 + `qa_iter_{n}.md`에 기록한다.
 
+## 2단계 검증 프로토콜 (iter 2+ 재검증 시)
+
+초회(iter 1)는 pytest 전체 + ruff check을 실행한다. iter 2 이후 재검증 시에는 2단계로 나눈다:
+
+**1단계 — 타겟 검증 (빠른 피드백):**
+- 이전 iter에서 실패했던 테스트만 재실행한다: `pytest tests/test_xxx.py::test_name -x`
+- `qa_iter_{n-1}.md`의 실패 테스트 목록에서 타겟을 결정한다
+- 1단계 fail → 즉시 `qa_iter_{n}.md` 작성, 구현 에이전트에 반환 (2단계 스킵)
+
+**2단계 — 회귀 검증 (전체 확인):**
+- 1단계 pass 후에만 실행한다
+- `pytest tests/` 전체 + `ruff check`으로 수정이 다른 테스트를 깨뜨리지 않았는지 확인한다
+- 2단계 fail → 새 실패 테스트를 `qa_iter_{n}.md`에 기록
+- 2단계 pass → QA 통과
+
 ## 작업 원칙
 
 - **코드 수정 금지**: 구현 코드, fixture 파일 어떤 것도 수정하지 않는다
