@@ -10,12 +10,12 @@ nested subagent trees and parallel-instance views.
 ┌──────────────────────────────────────┬──────────────────────────────────────┐
 │ Timeline                             │ Flowchart                            │
 │ ───────────────────────────────────  │ ──────────────────────────────────   │
-│ ts        tool      agent  status    │        ┌──────┐                      │
-│ 14:02:01  Task      main   ✓  1205   │        │ main │                      │
-│ 14:02:03  Task      main   ✓  4708   │        └───┬──┘                      │
-│ 14:02:10  Read      exec   ✓    12   │            │                         │
-│ 14:02:11  Edit      exec   ✓    45   │   ┌────────┼──────────┐              │
-│ ...                                  │   ▼        ▼          ▼              │
+│ ts        Turn  prompt    tools  dur │        ┌──────┐                      │
+│ 14:02:01  1     "Fix b…"  ✓  8  1.2s│        │ main │                      │
+│ 14:02:30  2     "Add f…"  ✓ 12  4.7s│        └───┬──┘                      │
+│ 14:08:55  3     "Now r…"  ▶  3    - │            │                         │
+│ ...                                  │   ┌────────┼──────────┐              │
+│                                      │   ▼        ▼          ▼              │
 │                                      │ ┌─────┐ ┌──────┐  ┌────────┐         │
 │                                      │ │plan │ │ exec │  │ critic │         │
 │                                      │ │(x3) │ │[Rd4] │  │        │         │
@@ -87,10 +87,11 @@ nested subagent trees and parallel-instance views.
   prevented — `Total` is the leaf sum only.
 - **TurnSummaryScreen fixed header** (v0.9.8): the Turn / Prompt /
   Duration·Agents·Skills·Errors / token summary line (`Tokens: Xk in /
-  Yk out / ...`) are pinned to the top of the modal. The scrollable body
-  holds Agents/Skills, Tool Usage, MCP, Hooks, Token Usage detail, and
-  the Tool Calls DataTable. Token usage is immediately visible without
-  scrolling, even when the Agents/Skills list is long.
+  Yk out / ...`) are pinned to the top of the modal. The body is split
+  into four independent scroll sections: **Token Usage** / **Agents·Skills** /
+  **Tool Usage+MCP+Hooks** / **Tool Calls DataTable** — each section gets
+  `height: 1fr` so no section crowds out the others. All items are fully
+  visible via per-section scroll; display caps (`+N more`) removed.
 - **Panel focus-based key routing** — clicking the Flowchart panel routes
   `↑`/`↓`/`j`/`k` to canvas scroll; clicking the Timeline panel routes them to
   DataTable cursor movement. Default at startup is Flowchart. Active panel is
@@ -194,7 +195,7 @@ tell agentlens which directory to compute the slug from.
 ## Tests
 
 ```bash
-pytest -q           # 281 tests
+pytest -q           # 313 tests
 ```
 
 ## Manual Verification
@@ -233,8 +234,9 @@ polling loop or set_interval rate is ever changed.
 
 ## Status
 
-v0.9.3 — Panel focus-based key routing. Clicking a panel routes `↑`/`↓`/`j`/`k`
-to that panel (flowchart scroll or timeline cursor). Active panel shown with a
-green border. Also fixes two timeline cursor snap-to-bottom bugs. 281 tests passing.
+Unreleased — TurnSummaryScreen independent scroll sections (Token Usage /
+Agents·Skills / Tool Usage+MCP+Hooks / Tool Calls DataTable, each `1fr`). Display
+caps removed. Timeline auto-scroll to latest turn on startup. Flowchart layout
+coalescing for fast startup. 313 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

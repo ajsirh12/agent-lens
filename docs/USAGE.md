@@ -1,4 +1,4 @@
-# agentlens 사용 가이드 (v0.9.3)
+# agentlens 사용 가이드 (v0.9.8+)
 
 Claude Code 세션 JSONL 을 실시간 tail 해서 **Timeline + 라이브 Flowchart** 두 패널로
 보여주는 Python + Textual TUI. 서브에이전트 호출, 스킬 호출, 병렬 spawn 까지 그래프로
@@ -52,12 +52,12 @@ agentlens
 ┌──────────────────────────────────────┬──────────────────────────────────────┐
 │ Timeline                             │ Flowchart                            │
 │ ───────────────────────────────────  │ ──────────────────────────────────   │
-│ ts        tool      agent  status    │        ┌──────┐                      │
-│ 14:02:01  Task      main   ✓  1205   │        │ main │                      │
-│ 14:02:03  Task      main   ✓  4708   │        └───┬──┘                      │
-│ 14:02:10  Read      exec   ✓    12   │            │                         │
-│ 14:02:11  Edit      exec   ✓    45   │   ┌────────┼──────────┐              │
-│ ...                                  │   ▼        ▼          ▼              │
+│ ts        Turn  prompt    tools  dur │        ┌──────┐                      │
+│ 14:02:01  1     "Fix b…"  ✓  8  1.2s│        │ main │                      │
+│ 14:02:30  2     "Add f…"  ✓ 12  4.7s│        └───┬──┘                      │
+│ 14:08:55  3     "Now r…"  ▶  3    - │            │                         │
+│ ...                                  │   ┌────────┼──────────┐              │
+│                                      │   ▼        ▼          ▼              │
 │                                      │ ┌─────┐ ┌──────┐  ┌────────┐         │
 │                                      │ │plan │ │ exec │  │ critic │         │
 │                                      │ │(x3) │ │[Rd4] │  │        │         │
@@ -68,7 +68,7 @@ agentlens
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Timeline (왼쪽)**: DataTable 에 tool_use / tool_result 이벤트를 시간순 표시. 선택된 row 는 flowchart 의 해당 agent 노드를 cross-highlight.
+- **Timeline (왼쪽)**: DataTable 에 **turn marker** 를 시간순 표시 (ts / Turn N / prompt 미리보기 / tool 수 / duration). 각 row 가 user turn 하나. Enter 키로 TurnSummaryScreen 을 열면 해당 turn 의 tool 상세 내역 확인 가능. 선택된 row 는 flowchart 의 해당 agent 노드를 cross-highlight.
 - **Flowchart (오른쪽)**: 실시간 호출 그래프. `main` → agent → nested child 계층. 박스 안에 label + (xN) 카운터 + tool-breakdown 뱃지 (e.g. `Rd12 Ed5`) + 상태 색상.
 - **Footer**: 세션 파일명, slug 소스, nodes/edges 카운트, 현재 모드 태그 `[mode/orient/pane]`. 좁은 터미널에서는 자동 wrap.
 
@@ -89,7 +89,7 @@ agentlens
 | `q` | 종료 |
 | `j` / `↓` | **활성 패널** 기준 — Flowchart 활성: 캔버스 아래 스크롤 / Timeline 활성: 커서 아래로 |
 | `k` / `↑` | **활성 패널** 기준 — Flowchart 활성: 캔버스 위 스크롤 / Timeline 활성: 커서 위로 |
-| `Enter` | **Turn Summary 모달** — turn marker 에서 Agents/Skills + Tool Usage + MCP + Hooks 요약 표시. Timeline row 선택 시 상세 모달 (tool name / input / status / duration) |
+| `Enter` | **Turn Summary 모달** — Timeline turn row 에서 TurnSummaryScreen 오픈. 고정 헤더(Turn / Prompt / Duration / token summary) + 4개 독립 스크롤 섹션: **Token Usage** / **Agents·Skills** / **Tool Usage+MCP+Hooks** / **Tool Calls DataTable** |
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
 | `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
 | `Shift+S` | 경로/세션 ID 붙여넣기 모달 — 임의의 JSONL 파일 또는 session id prefix 로 전환 |
@@ -202,20 +202,19 @@ main ─→ "Schema…" ─→ "Review…" ─┤                  ─→ "Criti
 | `[running]` | 턴 스코프 (flush 시 초기화) | instance 별 분리 | spawn 관계 |
 | `[flow]` | **세션 영속 (FlowRecord)** | **각 호출 개별** | **시간 순서 (temporal)** |
 
-### Timeline `▶`/`✓` 시작/완료 마커
+### Timeline — turn-only 모드 (v0.9.7+)
 
-Timeline 의 각 tool call 이 두 행으로 표시됩니다:
-- `▶ toolname` — 시작 행 (tool_use 도착 시, start timestamp)
-- `✓ toolname` — 완료 행 (tool_result 도착 시, **end timestamp**)
+Timeline 의 각 row 가 **user turn 하나** 를 나타냅니다 (tool call 별 row 가 아님):
 
 ```
-14:02:01  ▶ Agent    running   -
-14:02:01  ▶ Agent    running   -
-14:02:15  ✓ Agent    ok        14000
-14:02:30  ✓ Agent    ok        29000
+14:02:01  1  "Fix bug in parser…"  ✓  8  1.2s
+14:02:30  2  "Add feature…"        ✓ 12  4.7s
+14:08:55  3  "Now refactor…"       ▶  3   -
 ```
 
-완료 행은 result 의 timestamp 로 표시되어 **무엇이 먼저 끝났는지** 시간순으로 바로 보입니다. 시작 행도 status/duration 이 in-place 갱신되므로 스크롤해서 돌아봐도 최종 상태가 보입니다.
+- `▶` — LIVE 중인 turn (duration 미확정)
+- `✓ N` — 완료된 turn, N 개 tool 호출
+- Enter → TurnSummaryScreen 으로 해당 turn 의 tool 상세 열람
 
 ### Sticky Running
 Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트가 올 때까지** 노드는 초록(running) 으로 유지됩니다. 빠른 agent 가 바로 회색으로 바뀌어 놓치는 것을 방지합니다.
@@ -232,72 +231,54 @@ Agent 가 완료(`tool_result` 도착)되어도, **다음 사용자 프롬프트
 
 ### Turn Summary 모달 (v0.7.0+)
 
-Turn marker (Timeline 상의 `▶` user_message row) 에 Enter 를 누르면 **Turn Summary 모달** 이 표시됩니다.
-이 모달은 해당 turn 에서 실행된 Agents/Skills 과 하단의 4개 신규 섹션을 보여줍니다:
+Timeline turn row 에서 Enter 를 누르면 **TurnSummaryScreen** 이 표시됩니다.
 
-**섹션 표시 순서:**
-1. Agents/Skills (기존)
-2. **Token Usage** (v0.8.1+) — LLM 토큰 소비 분해 (새로움)
-   - `Total` — 이 turn 의 전체 토큰 합계 (bold)
-   - `main` — 메인 세션 어시스턴트만 (subagent 제외)
-   - **Skill Hierarchy** — skill span 내 spawned 에이전트의 토큰 (있을 때)
-     - `[skill] {name}` — skill node 라벨 + 누적 토큰
-       - `    [agent] {name}` — 해당 skill 내 subagent (들여쓰기 4칸)
-       - 상위 5개 skill, 상위 8개 per-skill agent
-       - 초과분: `... +N more skills`, `... +N more agents`
-   - **Agents** — standalone agent (skill 밖 독립 spawn)
-     - `agents (N)` — 소계 헤더 (2개 이상일 때, dim)
-     - `  {name:<22}` — 각 agent 라벨 + 토큰 (들여쓰기 2칸)
-     - 상위 8개, 초과분: `... +N more agents`
-   - 토큰이 0 인 행은 제외
-   - 기존 `token_nodes` 데이터만 있으면 자동 fallback (legacy mode)
-3. **Tool Usage** — 이 turn 에서 호출된 tool 들 (Read, Edit, Bash 등)
-   - 상위 8개를 count 내림차순, 이름 오름차순으로 정렬
-   - 초과분: `... +N more`
-   - 형식: `  {name:<14} ×{count}`
-4. **MCP** — MCP 프로토콜을 통한 외부 tool 호출 (v0.7.0+)
-   - 상위 6개를 count 내림차순으로 정렬
-   - 형식: `  {server·tool:<38} ×{count}` (U+00B7 separator)
-   - 초과분: `... +N more`
-5. **Hooks** — hook script 실행 요약 (v0.7.0+)
-   - Hook script 가 설정되어 있으면 표시 (`.claude/settings.json` 탐지)
-   - Hook 이 발생하지 않은 경우: `[dim](no hook fired this turn)[/dim]`
-   - Hook 이 발생한 경우: 상위 5개 script (count 내림차순, total_ms 내림차순 tiebreaker)
-   - 형식: `  {event:<14} {script:<24} ×{count}{err_tag}`
-   - `err_tag`: 에러 발생 시 ` [red]✗N[/red]` (N=error count)
-   - Header: 총 실행 횟수 + 총 에러 수 (있을 때만) + 총 duration (있을 때만)
+**레이아웃:**
 
-**예시:**
 ```
-Turn Summary — turn 2/3
-
-Agents/Skills
-  oh-my-claudecode:executor (x2)
-
-Token Usage
-  Total          3500 tokens
-  main           1200 tokens
-  
-  [skill] plan          1450 tokens
-      [agent] executor  800 tokens
-      [agent] reviewer  650 tokens
-  
-  agents (1)
-    standalone-critic    850 tokens
-
-Tool Usage
-  Read         ×8
-  Edit         ×3
-  Bash         ×2
-  ... +2 more
-
-MCP
-  postgres·query_table ×4
-  stripe·charge    ×1
-
-Hooks
-  [dim](no hook fired this turn)[/dim]
+┌─ 고정 헤더 (dock:top) ──────────────────────────────────────────┐
+│ Turn 3 / "Now refactor…"  1.2s | 2 agents | 3 skills | 0 err    │
+│ Tokens: 4.2k in / 1.1k out / 0.8k cache-r                       │
+├─ Section A: Token Usage (독립 스크롤) ──────────────────────────┤
+│   Total  5300 tokens  …                                          │
+├─ Section B: Agents · Skills (독립 스크롤) ──────────────────────┤
+│   oh-my-claudecode:executor (x2)  …                              │
+├─ Section C: Tool Usage + MCP + Hooks (독립 스크롤) ─────────────┤
+│   Read ×8  Edit ×3  …                                            │
+├─ Section D: Tool Calls DataTable (조건부, 독립 스크롤) ──────────┤
+│   time     tool   agent  sts  dur                                │
+│   14:02:01 Read   exec   ok   12ms                               │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+4개 섹션이 **독립적으로 스크롤**됩니다 (`height: 1fr` 균등 분배). 어느 한 섹션이 길어도 다른 섹션이 가려지지 않습니다.
+
+**섹션별 내용:**
+
+**Section A — Token Usage**
+- `Total` — 이 turn 의 전체 토큰 합계 (bold)
+- `main` — 메인 세션 어시스턴트만 (subagent 제외)
+- **Skill Hierarchy** — skill span 내 spawned 에이전트의 토큰
+  - `[skill] {name}` + 누적 토큰
+  - `    [agent] {name}` — 해당 skill 내 subagent (들여쓰기 4칸)
+- **Agents** — standalone agent (skill 밖 독립 spawn)
+- 토큰이 0 인 행은 제외; token 데이터 없으면 `(no token data)` placeholder
+
+**Section B — Agents · Skills**
+- 이 turn 에서 실행된 Agent/Skill 호출 목록 (스크롤)
+- 항목 없으면 `(no agent or skill invocations)` placeholder
+
+**Section C — Tool Usage + MCP + Hooks**
+- **Tool Usage**: Read, Edit, Bash 등 — count 내림차순, 형식 `{name:<14} ×{count}`
+- **MCP**: `{server·tool:<38} ×{count}` (U+00B7 separator)
+- **Hooks**: hook script 실행 요약; 미발생 시 `(no hook fired this turn)`
+
+**Section D — Tool Calls DataTable** (조건부)
+- tool_timeline 이 있을 때만 표시
+- 열: time / tool / agent / sts / dur
+- zebra stripe + row cursor; Esc 로 닫기
+
+**Esc / Enter**: 모달 닫기
 
 ### Mode: All vs Running
 
@@ -438,7 +419,7 @@ python scripts/fake_session.py --target /tmp/fake.jsonl --count 200 --rate 10 --
 ## 9. 테스트 실행
 
 ```bash
-pytest -q                                # 전체 (235 tests)
+pytest -q                                # 전체 (313 tests)
 pytest -q tests/test_parser.py
 pytest -q tests/test_instance_view.py
 pytest -q tests/test_flowchart_panel.py

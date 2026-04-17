@@ -10,9 +10,82 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **TurnSummaryScreen independent scroll sections** — The modal body is now
+  split into four independent scroll regions: Token Usage / Agents-Skills /
+  Tool Usage+MCP+Hooks / Tool Calls DataTable. Each region gets `height: 1fr`
+  so no section can crowd out the others. Display caps (`+N more`) removed —
+  all items are fully visible via per-section scroll.
+
+### Fixed
+
+- **Flowchart not updating on Timeline cursor move** — Moving the Timeline
+  cursor with `j`/`k` now propagates the active turn to the Flowchart panel
+  (same as pressing `[`/`]`). Previously the Flowchart only updated when
+  navigating with turn-navigation keys, not with cursor movement.
+- **Timeline auto-scroll to latest turn on startup** — When agentlens attaches
+  to a session with existing events, the Timeline cursor now lands on the most
+  recent turn row instead of staying at row 0. The `_do_scroll_to_end` guard
+  now distinguishes catch-up ingestion (new rows added since scheduling) from
+  a deliberate user scroll.
+
+### Performance
+
+- **Flowchart layout coalescing** — `add_event()` calls during bulk ingestion
+  (startup catch-up, rapid firing) no longer trigger an immediate
+  `_compute_layout()` + `_refresh_canvas()` per event. A dirty flag +
+  `call_after_refresh` coalesces N events per frame into one layout+render
+  cycle, eliminating startup slowness on large sessions.
+
+---
+
+## [0.9.8] - 2026-04-17
+
+TurnSummaryScreen fixed header. Token summary always visible regardless of
+body content length. 309 tests passing.
+
+### Added
+
+- **Fixed header in TurnSummaryScreen** — Turn / Prompt / Duration·Agents·
+  Skills·Errors / one-line token summary (`Tokens: Xk in / Yk out / …`) are
+  pinned to the top of the modal (`dock: top`). The scrollable body holds
+  Agents/Skills, Tool Usage, MCP, Hooks, Token Usage detail, and the Tool
+  Calls DataTable. Token usage is immediately visible without scrolling, even
+  when the Agents/Skills list is long.
+- **`_build_header_lines()` / `_build_body_lines()` split** — `_build_lines()`
+  retained as a backward-compatible wrapper returning the union of both.
+- **`_fmt_token_summary()` helper** — formats a one-line token summary
+  (`Xk in / Yk out / Zk cache-r / Wk cache-w`) for the fixed header; returns
+  `""` when all counts are zero.
+
+---
+
+## [0.9.7] - 2026-04-17
+
+Timeline turn-only mode. Main Timeline shows one row per user turn instead of
+one row per tool call. Tool-level detail accessible via TurnSummaryScreen
+(Enter). 309 tests passing.
+
 ### Changed
 
-- **TurnSummaryScreen independent scroll sections** — Split the single scrollable body into three independent scroll regions (Stats / Token Usage / Tool Timeline), so token data is always visible regardless of Agents/Skills list length.
+- **Timeline panel shows turn markers only** — Each row represents a user
+  turn: `ts / Turn N / prompt preview / tool count / duration`. Tool calls are
+  no longer shown as individual rows in the main Timeline; they are visible in
+  TurnSummaryScreen. `ToolDetailScreen` dead code removed from `app.py`.
+- **tool_use events increment turn's tool count in-place** — When a tool_use
+  event arrives, the `tools` cell of the current turn's row is updated
+  (`update_cell_at`) instead of adding a new row.
+- **Turn duration computed at next turn start** — The `dur` cell shows `LIVE`
+  until the next user message arrives; then the elapsed seconds are filled in.
+- **Timeline cursor cross-highlights flowchart** — Moving the Timeline cursor
+  to a turn row now sets `_active_turn` on the Flowchart panel, equivalent to
+  pressing `[`/`]`. The flowchart updates its DAG view to the selected turn.
+
+### Fixed
+
+- **`get_selected_turn_index()`** — Uses `DataTable.get_row_index()` for
+  robust lookup after FIFO cap eviction, instead of relying on dict order.
 
 ---
 
@@ -119,15 +192,6 @@ that occurred during manual scrolling. 281 tests passing.
   canvas by default (app start). To move the Timeline cursor, click the Timeline
   panel first. This is a behavior change from v0.9.2, where these keys always
   moved the Timeline cursor.
-
----
-
-## [Unreleased]
-
-### Changed
-
-- Timeline panel now shows only turn markers (ts / Turn N / prompt / tool count / duration); individual tool calls visible in TurnSummaryScreen (Enter)
-- TurnSummaryScreen now shows a fixed header (Turn / Prompt / Duration / token summary) with a scrollable body; token usage is immediately visible without scrolling even when Agents/Skills list is long
 
 ---
 
