@@ -263,6 +263,17 @@ class TimelinePanel(Container):
         self._highlight_from_timeline = True
         try:
             self.app.selected_agent_id = aid  # type: ignore[attr-defined]
+            # In turn-only mode every row is a turn marker ("__turn:N").
+            # Propagate the turn index to the flowchart so it filters to
+            # that turn — same effect as pressing [ / ].
+            if isinstance(aid, str) and aid.startswith("__turn:"):
+                try:
+                    turn_num = int(aid.split(":", 1)[1])
+                    self.app._active_turn = turn_num - 1  # type: ignore[attr-defined]
+                    self.app._propagate_turn_to_flowchart()  # type: ignore[attr-defined]
+                    self.app._update_footer()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
         except Exception:
             self._highlight_from_timeline = False
 
