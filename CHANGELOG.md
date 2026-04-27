@@ -12,8 +12,15 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ### Added
 
+- **TurnSummaryScreen prompt section** — The full user prompt is now
+  displayed in a dedicated independent scroll section at the top of the
+  modal body (`#turn-section-prompt`, `height: 1fr`). Multi-line prompts
+  are preserved as-is. Rich markup characters (`[`, `]`) are rendered
+  as plain text (`markup=False`). The fixed header no longer shows a
+  truncated prompt preview; the header now shows Turn / Duration / Tokens
+  only (3 lines, `max-height: 4`).
 - **TurnSummaryScreen independent scroll sections** — The modal body is now
-  split into four independent scroll regions: Token Usage / Agents-Skills /
+  split into five independent scroll regions: **Prompt** / Token Usage / Agents-Skills /
   Tool Usage+MCP+Hooks / Tool Calls DataTable. Each region gets `height: 1fr`
   so no section can crowd out the others. Display caps (`+N more`) removed —
   all items are fully visible via per-section scroll.

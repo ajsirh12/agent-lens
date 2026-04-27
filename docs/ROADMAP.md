@@ -22,7 +22,8 @@ actionable later without reconstructing the reasoning.
 | v0.9.3 | Panel focus-based key routing (`↑`/`↓`/`j`/`k` routed to active panel); active panel green border; timeline cursor snap-to-bottom bug fix (`_highlight_from_timeline` flag + `_do_scroll_to_end` guard) |
 | v0.9.6 | Turn Summary mini timeline — per-turn tool call DataTable (time/tool/agent/sts/dur), `TurnRecord.tool_events`, `MAX_TOOL_EVENTS=200` |
 | v0.9.7 | Timeline turn-only mode — main Timeline shows only turn markers (ts / Turn N / prompt / tool count / duration); tool-level detail via TurnSummaryScreen (Enter); ToolDetailScreen dead code removed from app.py |
-| v0.9.8 | TurnSummaryScreen fixed header — Turn / Prompt / Duration / token summary line pinned to top; scrollable body holds Agents/Skills, Tool Usage, MCP, Hooks, Token Usage detail, Tool Calls DataTable; token usage visible without scrolling |
+| v0.9.8 | TurnSummaryScreen fixed header — Turn / Duration / token summary line pinned to top; scrollable body holds Prompt, Token Usage detail, Agents/Skills, Tool Usage, MCP, Hooks, Tool Calls DataTable; full prompt now in dedicated section at body top |
+| Unreleased | TurnSummaryScreen prompt section — full user prompt displayed in dedicated independent scroll section at body top with multi-line preservation; header trimmed to Turn/Duration/Tokens; five sections total |
 | Unreleased | Flow mode P3 fix: cross-turn running parent now correctly links to spawned child (parent_records prepended before turn_records) |
 | Unreleased | Flow mode P4 fix: flow_label capped at 35 chars with `…` suffix; `_FLOW_LABEL_MAX=35` constant added |
 | Unreleased | Flow mode P5 fix: turn < 0 returns empty subgraph (consistent with all/running modes) |

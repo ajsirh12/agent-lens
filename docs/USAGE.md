@@ -89,7 +89,7 @@ agentlens
 | `q` | 종료 |
 | `j` / `↓` | **활성 패널** 기준 — Flowchart 활성: 캔버스 아래 스크롤 / Timeline 활성: 커서 아래로 |
 | `k` / `↑` | **활성 패널** 기준 — Flowchart 활성: 캔버스 위 스크롤 / Timeline 활성: 커서 위로 |
-| `Enter` | **Turn Summary 모달** — Timeline turn row 에서 TurnSummaryScreen 오픈. 고정 헤더(Turn / Prompt / Duration / token summary) + 4개 독립 스크롤 섹션: **Token Usage** / **Agents·Skills** / **Tool Usage+MCP+Hooks** / **Tool Calls DataTable** |
+| `Enter` | **Turn Summary 모달** — Timeline turn row 에서 TurnSummaryScreen 오픈. 고정 헤더(Turn / Duration / token summary) + 5개 독립 스크롤 섹션: **Prompt** / **Token Usage** / **Agents·Skills** / **Tool Usage+MCP+Hooks** / **Tool Calls DataTable** |
 | `d` | 선택된 flowchart agent 노드의 subagent drill-down 모달 |
 | `s` | 세션 전환 picker — 같은 slug 디렉토리의 다른 JSONL 로 이동 |
 | `Shift+S` | 경로/세션 ID 붙여넣기 모달 — 임의의 JSONL 파일 또는 session id prefix 로 전환 |
@@ -237,25 +237,33 @@ Timeline turn row 에서 Enter 를 누르면 **TurnSummaryScreen** 이 표시됩
 
 ```
 ┌─ 고정 헤더 (dock:top) ──────────────────────────────────────────┐
-│ Turn 3 / "Now refactor…"  1.2s | 2 agents | 3 skills | 0 err    │
+│ Turn 3  1.2s | 2 agents | 3 skills | 0 err                      │
 │ Tokens: 4.2k in / 1.1k out / 0.8k cache-r                       │
-├─ Section A: Token Usage (독립 스크롤) ──────────────────────────┤
+├─ Section A: Prompt (독립 스크롤) ─────────────────────────────────┤
+│   Now refactor the codebase to improve readability and reduce…  │
+├─ Section B: Token Usage (독립 스크롤) ──────────────────────────┤
 │   Total  5300 tokens  …                                          │
-├─ Section B: Agents · Skills (독립 스크롤) ──────────────────────┤
+├─ Section C: Agents · Skills (독립 스크롤) ──────────────────────┤
 │   oh-my-claudecode:executor (x2)  …                              │
-├─ Section C: Tool Usage + MCP + Hooks (독립 스크롤) ─────────────┤
+├─ Section D: Tool Usage + MCP + Hooks (독립 스크롤) ─────────────┤
 │   Read ×8  Edit ×3  …                                            │
-├─ Section D: Tool Calls DataTable (조건부, 독립 스크롤) ──────────┤
+├─ Section E: Tool Calls DataTable (조건부, 독립 스크롤) ──────────┤
 │   time     tool   agent  sts  dur                                │
 │   14:02:01 Read   exec   ok   12ms                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-4개 섹션이 **독립적으로 스크롤**됩니다 (`height: 1fr` 균등 분배). 어느 한 섹션이 길어도 다른 섹션이 가려지지 않습니다.
+5개 섹션이 **독립적으로 스크롤**됩니다 (`height: 1fr` 균등 분배). 어느 한 섹션이 길어도 다른 섹션이 가려지지 않습니다.
 
 **섹션별 내용:**
 
-**Section A — Token Usage**
+**Section A — Prompt**
+- 사용자가 이 turn 에서 입력한 전체 프롬프트 텍스트
+- 다중 라인 포맷 보존: 프롬프트의 `\n` 은 그대로 표시됨
+- 리치 마크업 문자(`[`, `]`)는 일반 텍스트로 렌더링 (`markup=False`)
+- 프롬프트가 비어 있으면 `[dim](empty)[/dim]` 표시
+
+**Section B — Token Usage**
 - `Total` — 이 turn 의 전체 토큰 합계 (bold)
 - `main` — 메인 세션 어시스턴트만 (subagent 제외)
 - **Skill Hierarchy** — skill span 내 spawned 에이전트의 토큰
@@ -264,16 +272,16 @@ Timeline turn row 에서 Enter 를 누르면 **TurnSummaryScreen** 이 표시됩
 - **Agents** — standalone agent (skill 밖 독립 spawn)
 - 토큰이 0 인 행은 제외; token 데이터 없으면 `(no token data)` placeholder
 
-**Section B — Agents · Skills**
+**Section C — Agents · Skills**
 - 이 turn 에서 실행된 Agent/Skill 호출 목록 (스크롤)
 - 항목 없으면 `(no agent or skill invocations)` placeholder
 
-**Section C — Tool Usage + MCP + Hooks**
+**Section D — Tool Usage + MCP + Hooks**
 - **Tool Usage**: Read, Edit, Bash 등 — count 내림차순, 형식 `{name:<14} ×{count}`
 - **MCP**: `{server·tool:<38} ×{count}` (U+00B7 separator)
 - **Hooks**: hook script 실행 요약; 미발생 시 `(no hook fired this turn)`
 
-**Section D — Tool Calls DataTable** (조건부)
+**Section E — Tool Calls DataTable** (조건부)
 - tool_timeline 이 있을 때만 표시
 - 열: time / tool / agent / sts / dur
 - zebra stripe + row cursor; Esc 로 닫기
@@ -419,7 +427,7 @@ python scripts/fake_session.py --target /tmp/fake.jsonl --count 200 --rate 10 --
 ## 9. 테스트 실행
 
 ```bash
-pytest -q                                # 전체 (313 tests)
+pytest -q                                # 전체 (318 tests)
 pytest -q tests/test_parser.py
 pytest -q tests/test_instance_view.py
 pytest -q tests/test_flowchart_panel.py

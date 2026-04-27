@@ -18,6 +18,7 @@ from agentlens.panels.turn_summary import (
     _fmt_ms,
     _fmt_tokens,
     _mcp_display,
+    _sanitize_prompt,
     _trunc,
 )
 
@@ -903,7 +904,8 @@ def test_existing_sections_unchanged() -> None:
     combined = _combined(summary)
     # Existing sections still present
     assert "Turn 1" in combined
-    assert "test prompt" in combined
+    # prompt is no longer in _build_lines output (moved to #turn-section-prompt in compose())
+    assert "test prompt" not in combined
     assert "Agents / Skills" in combined
     assert "Plan work" in combined
     assert "Tool Usage (2 calls)" in combined
@@ -943,7 +945,7 @@ def test_fmt_token_summary_partial_zeros() -> None:
 
 
 def test_build_header_lines_contains_turn_info() -> None:
-    """_build_header_lines returns Turn number, Prompt, Duration lines."""
+    """_build_header_lines returns Turn number, Duration lines. Prompt moved to #turn-section-prompt."""
     summary = {
         "index": 0,
         "prompt": "hello world",
@@ -957,7 +959,6 @@ def test_build_header_lines_contains_turn_info() -> None:
     lines = _build_header_lines(summary)
     combined = "\n".join(lines)
     assert "Turn 1" in combined
-    assert "hello world" in combined
     assert "Duration:" in combined
     assert "Agents: 2" in combined
     assert "Skills: 3" in combined
@@ -997,6 +998,45 @@ def test_build_header_lines_no_token_when_zero() -> None:
     lines = _build_header_lines(summary)
     combined = "\n".join(lines)
     assert "Tokens:" not in combined
+
+
+# --- _sanitize_prompt tests ---
+
+
+def test_sanitize_prompt_preserves_newlines() -> None:
+    """_sanitize_prompt keeps \\n (unlike _sanitize)."""
+    assert _sanitize_prompt("a\nb") == "a\nb"
+
+
+def test_sanitize_prompt_blocks_ansi() -> None:
+    assert "\x1b" not in _sanitize_prompt("a\x1b[31mb")
+
+
+def test_sanitize_prompt_caps_at_10k() -> None:
+    long = "x" * 20_000
+    result = _sanitize_prompt(long)
+    assert len(result) == 10_000
+
+
+def test_sanitize_prompt_handles_empty() -> None:
+    assert _sanitize_prompt("") == ""
+
+
+def test_build_header_lines_no_prompt_line() -> None:
+    """Prompt no longer appears in fixed header (it moved to #turn-section-prompt)."""
+    summary = {
+        "index": 0,
+        "prompt": "hello world",
+        "duration_s": 1.0,
+        "agent_count": 0,
+        "skill_count": 0,
+        "error_count": 0,
+        "end_ts": 1.0,
+        "agents": [],
+    }
+    combined = "\n".join(_build_header_lines(summary))
+    assert "hello world" not in combined
+    assert "Prompt:" not in combined
 
 
 # --- _build_body_lines tests ---

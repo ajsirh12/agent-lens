@@ -85,13 +85,15 @@ nested subagent trees and parallel-instance views.
   spans list their sub-agents with 4-space indentation; standalone agents
   appear under a separate `agents (N)` section. Double-counting is
   prevented — `Total` is the leaf sum only.
-- **TurnSummaryScreen fixed header** (v0.9.8): the Turn / Prompt /
+- **TurnSummaryScreen fixed header and prompt section** (v0.9.8+): the Turn /
   Duration·Agents·Skills·Errors / token summary line (`Tokens: Xk in /
   Yk out / ...`) are pinned to the top of the modal. The body is split
-  into four independent scroll sections: **Token Usage** / **Agents·Skills** /
+  into five independent scroll sections: **Prompt** / **Token Usage** / **Agents·Skills** /
   **Tool Usage+MCP+Hooks** / **Tool Calls DataTable** — each section gets
   `height: 1fr` so no section crowds out the others. All items are fully
-  visible via per-section scroll; display caps (`+N more`) removed.
+  visible via per-section scroll; display caps (`+N more`) removed. The full
+  user prompt is displayed in the dedicated Prompt section with multi-line
+  formatting preserved; rich markup characters are rendered as plain text.
 - **Panel focus-based key routing** — clicking the Flowchart panel routes
   `↑`/`↓`/`j`/`k` to canvas scroll; clicking the Timeline panel routes them to
   DataTable cursor movement. Default at startup is Flowchart. Active panel is
@@ -195,7 +197,7 @@ tell agentlens which directory to compute the slug from.
 ## Tests
 
 ```bash
-pytest -q           # 313 tests
+pytest -q           # 318 tests
 ```
 
 ## Manual Verification
@@ -234,9 +236,10 @@ polling loop or set_interval rate is ever changed.
 
 ## Status
 
-Unreleased — TurnSummaryScreen independent scroll sections (Token Usage /
-Agents·Skills / Tool Usage+MCP+Hooks / Tool Calls DataTable, each `1fr`). Display
-caps removed. Timeline auto-scroll to latest turn on startup. Flowchart layout
-coalescing for fast startup. 313 tests passing.
+Unreleased — TurnSummaryScreen prompt section (full user prompt in dedicated
+scroll section at body top with multi-line preservation). Header trimmed to
+Turn / Duration / Tokens (3 lines). Five independent scroll sections total.
+Timeline auto-scroll to latest turn on startup. Flowchart layout coalescing
+for fast startup. 318 tests passing.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.

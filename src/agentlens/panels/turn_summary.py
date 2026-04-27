@@ -22,12 +22,22 @@ _TOP_N_SKILL = 5
 _TOP_N_AGENT = 8
 _TOP_N_TOKEN = 10  # legacy token_nodes fallback
 _TOP_N_TIMELINE = 200  # max rows in the tool timeline DataTable
+_PROMPT_MAX_LEN = 10_000  # prompt 전용 표시 상한 (_sanitize()의 500자 캡과 별도)
 
 
 def _sanitize(s: object) -> str:
     text = str(s)
     text = "".join(c for c in text if (c.isprintable() or c == "\t") and c not in "\x1b\r")
     return text[:500]
+
+
+def _sanitize_prompt(text: str) -> str:
+    """prompt 전용 sanitize: ANSI/제어문자 제거, 10,000자 캡. _sanitize() 미변경."""
+    cleaned = "".join(
+        c for c in str(text or "")
+        if (c.isprintable() or c in "\t\n") and c not in "\x1b\r"
+    )
+    return cleaned[:_PROMPT_MAX_LEN]
 
 
 def _fmt_dur(seconds: float) -> str:
@@ -120,10 +130,13 @@ def _fmt_token_summary(token_total: dict) -> str:
 
 
 def _build_header_lines(s: dict[str, Any]) -> list[str]:
-    """Build the fixed header lines: Turn, Prompt, Duration, Token summary."""
+    """Build the fixed header lines: Turn, Duration, Token summary.
+
+    Note: Prompt is rendered in #turn-section-prompt (scrollable section),
+    not in the fixed header — see compose().
+    """
     lines: list[str] = []
     index = int(s.get("index", 0))
-    prompt = _sanitize(s.get("prompt", ""))
     duration = float(s.get("duration_s", 0.0))
     agent_count = int(s.get("agent_count", 0))
     skill_count = int(s.get("skill_count", 0))
@@ -134,7 +147,6 @@ def _build_header_lines(s: dict[str, Any]) -> list[str]:
     if is_live:
         header_parts.append("(LIVE)")
     lines.append(f"[bold]{' '.join(header_parts)}[/bold]")
-    lines.append(f"Prompt:   {prompt if prompt else '(empty)'}")
     lines.append(
         f"Duration: {_fmt_dur(duration)}"
         f"   Agents: {agent_count}"
@@ -389,7 +401,7 @@ class TurnSummaryScreen(Screen[None]):
         dock: top;
         width: 100%;
         height: auto;
-        max-height: 6;
+        max-height: 4;
         padding: 1 2 0 2;
         background: $panel;
         border-bottom: solid $accent;
@@ -397,6 +409,12 @@ class TurnSummaryScreen(Screen[None]):
     #turn-sections {
         width: 100%;
         height: 1fr;
+    }
+    #turn-section-prompt {
+        height: 1fr;
+        min-height: 3;
+        padding: 0 2;
+        border-bottom: solid $accent-darken-2;
     }
     #turn-section-tokens {
         height: 1fr;
@@ -445,6 +463,15 @@ class TurnSummaryScreen(Screen[None]):
         yield Static("\n".join(header_lines), id="turn-summary-header")
 
         with Vertical(id="turn-sections"):
+            # Section 0: Prompt (전문 스크롤 표시)
+            with ScrollableContainer(id="turn-section-prompt"):
+                prompt_text = _sanitize_prompt(self.summary.get("prompt", ""))
+                yield Static("[bold]Prompt[/bold]")
+                if prompt_text:
+                    yield Static(prompt_text, markup=False)
+                else:
+                    yield Static("[dim](empty)[/dim]", classes="placeholder")
+
             # Section A: Token Usage
             with ScrollableContainer(id="turn-section-tokens"):
                 if token_lines:
