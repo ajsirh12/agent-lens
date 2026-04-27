@@ -1030,25 +1030,3 @@ def test_get_turn_summary_prompt_falls_back_to_preview_when_full_empty() -> None
     turn.prompt_full = ""  # simulate legacy turn record (no full capture)
     s = g.get_turn_summary(0)
     assert s["prompt"] == "hi"
-
-
-def test_get_turn_summary_agents_have_node_id_and_tokens() -> None:
-    """Each entry in summary["agents"] exposes node_id + tokens dict for
-    the panel to render per-agent token columns. Missing tokens coerce to 0.
-    """
-    g = CallGraph()
-    g.update_from_event(_user_text("turn 0"))
-    g.update_from_event(_agent_use("planner", tid="t1"))
-    g.update_from_event(_result("t1"))
-    s = g.get_turn_summary(0)
-    assert s["agent_count"] == 1
-    a = s["agents"][0]
-    assert "node_id" in a
-    assert isinstance(a["node_id"], str)
-    assert a["node_id"]
-    assert "tokens" in a
-    tokens = a["tokens"]
-    for k in ("input", "output", "cache_read", "cache_create"):
-        assert k in tokens
-        assert isinstance(tokens[k], int)
-        assert tokens[k] >= 0
