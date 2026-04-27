@@ -9,11 +9,13 @@ import pytest
 from agentlens.events import EventType, HarnessEvent
 from agentlens.graph_model import CallGraph
 from agentlens.panels.turn_summary import (
+    _build_agents_lines,
     _build_lines,
     _build_header_lines,
     _build_body_lines,
     _build_stats_lines,
     _build_token_lines,
+    _fmt_inline_tokens,
     _fmt_token_summary,
     _fmt_ms,
     _fmt_tokens,
@@ -1207,3 +1209,139 @@ def test_build_body_lines_backward_compat() -> None:
     assert "Agents / Skills" in combined
     assert "Token Usage" in combined
     assert "(Esc / Enter to close)" in combined
+
+
+# --- Per-agent inline token formatting (turn-detail-tokens F2) ---
+
+
+def test_fmt_inline_tokens_all_zero_returns_empty() -> None:
+    """All-zero tokens → empty string so callers can omit the token col."""
+    assert _fmt_inline_tokens(
+        {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}
+    ) == ""
+
+
+def test_fmt_inline_tokens_none_returns_empty() -> None:
+    """None / falsy input never raises and returns an empty string."""
+    assert _fmt_inline_tokens(None) == ""
+    assert _fmt_inline_tokens({}) == ""
+
+
+def test_fmt_inline_tokens_omits_cache_create_when_zero() -> None:
+    """cw (cache_create) column is omitted when zero; in/out/cr always shown."""
+    out = _fmt_inline_tokens(
+        {"input": 1200, "output": 450, "cache_read": 28_000, "cache_create": 0}
+    )
+    assert "in:" in out
+    assert "out:" in out
+    assert "cr:" in out
+    assert "cw:" not in out
+
+
+def test_fmt_inline_tokens_includes_cache_create_when_nonzero() -> None:
+    out = _fmt_inline_tokens(
+        {"input": 100, "output": 50, "cache_read": 0, "cache_create": 5_600}
+    )
+    assert "cw:" in out
+
+
+def test_fmt_inline_tokens_coerces_non_int() -> None:
+    """Strings/None never raise; bad values coerce to 0 then to ''."""
+    assert _fmt_inline_tokens(
+        {"input": "abc", "output": None, "cache_read": "xx", "cache_create": None}
+    ) == ""
+
+
+def test_build_agents_lines_inline_tokens_when_term_width_ge_100() -> None:
+    """term_width >= 100 → tokens appear inline on the same line."""
+    summary = {
+        "duration_s": 5.0,
+        "total_agent_duration_s": 3.0,
+        "agents": [
+            {
+                "label": "planner",
+                "description": "Plan work",
+                "node_id": "agent:planner",
+                "node_type": "agent",
+                "duration_s": 3.0,
+                "status": "done",
+                "is_background": False,
+                "tokens": {
+                    "input": 1200,
+                    "output": 450,
+                    "cache_read": 28_000,
+                    "cache_create": 0,
+                },
+            }
+        ],
+    }
+    lines = _build_agents_lines(summary, term_width=120)
+    agent_lines = [ln for ln in lines if "planner" in ln]
+    # The agent's row line itself contains both the label and the inline tokens.
+    assert any("planner" in ln and "in:" in ln for ln in agent_lines), (
+        f"expected inline token col on the agent row, got: {agent_lines!r}"
+    )
+
+
+def test_build_agents_lines_fallback_tokens_when_term_width_lt_100() -> None:
+    """term_width < 100 → tokens appear on a separate indented line below."""
+    summary = {
+        "duration_s": 5.0,
+        "total_agent_duration_s": 3.0,
+        "agents": [
+            {
+                "label": "planner",
+                "description": "Plan work",
+                "node_id": "agent:planner",
+                "node_type": "agent",
+                "duration_s": 3.0,
+                "status": "done",
+                "is_background": False,
+                "tokens": {
+                    "input": 1200,
+                    "output": 450,
+                    "cache_read": 28_000,
+                    "cache_create": 0,
+                },
+            }
+        ],
+    }
+    lines = _build_agents_lines(summary, term_width=80)
+    # No single line should contain both the label AND the inline tokens.
+    inline = [ln for ln in lines if "planner" in ln and "in:" in ln]
+    assert inline == [], f"tokens must not be inline at narrow width: {inline!r}"
+    # But the token col must appear in some indented continuation line.
+    assert any("in:" in ln and "planner" not in ln for ln in lines), (
+        f"expected continuation line with tokens, got: {lines!r}"
+    )
+
+
+def test_build_agents_lines_omits_token_col_when_all_zero() -> None:
+    """An agent with all-zero tokens must not produce a token column at all."""
+    summary = {
+        "duration_s": 5.0,
+        "total_agent_duration_s": 3.0,
+        "agents": [
+            {
+                "label": "planner",
+                "description": "Plan work",
+                "node_id": "agent:planner",
+                "node_type": "agent",
+                "duration_s": 3.0,
+                "status": "done",
+                "is_background": False,
+                "tokens": {
+                    "input": 0,
+                    "output": 0,
+                    "cache_read": 0,
+                    "cache_create": 0,
+                },
+            }
+        ],
+    }
+    lines_wide = _build_agents_lines(summary, term_width=120)
+    lines_narrow = _build_agents_lines(summary, term_width=80)
+    for lines in (lines_wide, lines_narrow):
+        assert all("in:" not in ln for ln in lines), (
+            f"token col must be omitted when all zero, got: {lines!r}"
+        )

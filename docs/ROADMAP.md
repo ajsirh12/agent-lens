@@ -24,6 +24,7 @@ actionable later without reconstructing the reasoning.
 | v0.9.7 | Timeline turn-only mode — main Timeline shows only turn markers (ts / Turn N / prompt / tool count / duration); tool-level detail via TurnSummaryScreen (Enter); ToolDetailScreen dead code removed from app.py |
 | v0.9.8 | TurnSummaryScreen fixed header — Turn / Duration / token summary line pinned to top; scrollable body holds Prompt, Token Usage detail, Agents/Skills, Tool Usage, MCP, Hooks, Tool Calls DataTable; full prompt now in dedicated section at body top |
 | Unreleased | TurnSummaryScreen prompt section — full user prompt displayed in dedicated independent scroll section at body top with multi-line preservation; header trimmed to Turn/Duration/Tokens; five sections total |
+| Unreleased | TurnSummaryScreen per-agent token display — each agent/skill row in Agents·Skills section shows token consumption (`in:Xk out:Yk cr:Zk`); inlined on terminals ≥100 chars, folded to next line (8-space indent) on narrower terminals; all-zero rows omit token column |
 | Unreleased | Flow mode P3 fix: cross-turn running parent now correctly links to spawned child (parent_records prepended before turn_records) |
 | Unreleased | Flow mode P4 fix: flow_label capped at 35 chars with `…` suffix; `_FLOW_LABEL_MAX=35` constant added |
 | Unreleased | Flow mode P5 fix: turn < 0 returns empty subgraph (consistent with all/running modes) |
@@ -31,6 +32,7 @@ actionable later without reconstructing the reasoning.
 | Unreleased | Timeline auto-scroll to latest turn on startup — `_do_scroll_to_end` catch-up guard uses snapshot to distinguish bulk ingestion from manual scroll |
 | Unreleased | Flowchart layout coalescing — dirty flag + `call_after_refresh` batches N events per frame, eliminates startup slowness on large sessions |
 | Unreleased | Flowchart cross-highlight fix — Timeline `j`/`k` cursor now propagates active turn to Flowchart (same as `[`/`]`) |
+| Unreleased | Parser user prompt cap relaxation — parser.py `_USER_PROMPT_MAX_LEN=10_000` applied to real user prompts only (excluding meta/sidechain rows), preserving full prompt text for TurnSummaryScreen while maintaining memory bounds |
 | — | M-AC8-idle automated (test_idle_footer.py); M-AC11 measured at 0.16% idle CPU |
 
 ---

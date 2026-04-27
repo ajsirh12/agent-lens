@@ -980,3 +980,75 @@ def test_tool_timeline_fallback() -> None:
     s = g.get_turn_summary(999)
     assert "tool_timeline" in s
     assert s["tool_timeline"] == []
+
+
+# --- Prompt full-text capture (turn-detail-tokens F1) ---
+
+
+def _user_text(text: str) -> HarnessEvent:
+    return HarnessEvent(
+        type=EventType.user_message,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"text": text},
+    )
+
+
+def test_turn_record_stores_prompt_full_and_preview() -> None:
+    """A new user turn captures the full prompt in prompt_full and a 40-char
+    preview in prompt_preview (legacy field preserved for callers).
+    """
+    g = CallGraph()
+    long_prompt = "p" * 1000
+    g.update_from_event(_user_text(long_prompt))
+    turn = g._turns[-1]
+    assert turn.prompt_full == long_prompt
+    assert len(turn.prompt_full) == 1000
+    assert turn.prompt_preview == "p" * 40
+    assert len(turn.prompt_preview) == 40
+
+
+def test_get_turn_summary_prompt_returns_prompt_full() -> None:
+    """summary["prompt"] returns the full prompt (prompt_full), not the
+    40-char preview, so TurnSummaryScreen can render it in full.
+    """
+    g = CallGraph()
+    long_prompt = "<command-message>turn-detail-tokens</command-message>" + ("x" * 500)
+    g.update_from_event(_user_text(long_prompt))
+    s = g.get_turn_summary(0)
+    assert s["prompt"] == long_prompt
+    assert len(s["prompt"]) == len(long_prompt)
+
+
+def test_get_turn_summary_prompt_falls_back_to_preview_when_full_empty() -> None:
+    """Backward compat: turns with empty prompt_full but populated
+    prompt_preview must still surface the preview in summary["prompt"].
+    """
+    g = CallGraph()
+    g.update_from_event(_user_text("hi"))
+    turn = g._turns[-1]
+    turn.prompt_full = ""  # simulate legacy turn record (no full capture)
+    s = g.get_turn_summary(0)
+    assert s["prompt"] == "hi"
+
+
+def test_get_turn_summary_agents_have_node_id_and_tokens() -> None:
+    """Each entry in summary["agents"] exposes node_id + tokens dict for
+    the panel to render per-agent token columns. Missing tokens coerce to 0.
+    """
+    g = CallGraph()
+    g.update_from_event(_user_text("turn 0"))
+    g.update_from_event(_agent_use("planner", tid="t1"))
+    g.update_from_event(_result("t1"))
+    s = g.get_turn_summary(0)
+    assert s["agent_count"] == 1
+    a = s["agents"][0]
+    assert "node_id" in a
+    assert isinstance(a["node_id"], str)
+    assert a["node_id"]
+    assert "tokens" in a
+    tokens = a["tokens"]
+    for k in ("input", "output", "cache_read", "cache_create"):
+        assert k in tokens
+        assert isinstance(tokens[k], int)
+        assert tokens[k] >= 0

@@ -26,6 +26,11 @@ MAX_RAW_LINE = 8192
 # against adversarial payloads with unbounded hook info arrays.
 MAX_HOOK_INFOS = 50
 
+# User prompt only — relaxed text cap so TurnSummaryScreen can show the
+# full prompt (XML wrappers, multi-line, ~few KB). All other text blocks
+# (assistant, sidechain, isMeta system-injected user rows) keep [:500].
+_USER_PROMPT_MAX_LEN = 10_000
+
 
 def _truncate(s: str) -> str:
     return s[:MAX_RAW_LINE]
@@ -250,6 +255,7 @@ def parse_line(line: str) -> list[HarnessEvent]:
     # notices, hook messages, etc.) that must NOT be treated as real
     # user turn boundaries by the graph model's sticky-running flush.
     is_meta = bool(obj.get("isMeta"))
+    is_sidechain = bool(obj.get("isSidechain"))
 
     if top_type not in SUPPORTED_TOP_TYPES:
         log.debug("unknown top-level type: %r", top_type)
@@ -470,8 +476,19 @@ def parse_line(line: str) -> list[HarnessEvent]:
                 if top_type == "assistant"
                 else EventType.user_message
             )
+            raw_text = block.get("text", "")
+            if not isinstance(raw_text, str):
+                raw_text = ""
+            # Real user prompts get the relaxed cap so the full prompt
+            # (XML wrappers, multi-line) is preserved for TurnSummaryScreen.
+            # Assistant text, sidechain rows, and isMeta system-injected
+            # user rows keep the legacy 500-char cap.
+            if top_type == "user" and not is_meta and not is_sidechain:
+                text_value = raw_text[:_USER_PROMPT_MAX_LEN]
+            else:
+                text_value = raw_text[:500]
             text_payload: dict[str, Any] = {
-                "text": block.get("text", "")[:500],
+                "text": text_value,
                 "is_meta": is_meta,
             }
             # Attach row-level usage to the first event of any block type (FR-2,

@@ -274,6 +274,10 @@ Timeline turn row 에서 Enter 를 누르면 **TurnSummaryScreen** 이 표시됩
 
 **Section C — Agents · Skills**
 - 이 turn 에서 실행된 Agent/Skill 호출 목록 (스크롤)
+- 각 행에 해당 에이전트/스킬의 토큰 사용량 표시:
+  - 터미널 폭 ≥100 글자: 같은 라인에 인라인 표시 (`in:1.2k out:450 cr:28k`)
+  - 터미널 폭 <100 글자: 다음 라인에 들여쓰기(8칸) 표시
+  - 모든 토큰이 0이면 토큰 컬럼 생략 (시각적 노이즈 제거)
 - 항목 없으면 `(no agent or skill invocations)` placeholder
 
 **Section D — Tool Usage + MCP + Hooks**

@@ -94,6 +94,11 @@ nested subagent trees and parallel-instance views.
   visible via per-section scroll; display caps (`+N more`) removed. The full
   user prompt is displayed in the dedicated Prompt section with multi-line
   formatting preserved; rich markup characters are rendered as plain text.
+- **Per-agent token display in Agents/Skills section** — Each agent and
+  skill row now shows token consumption (`in:Xk out:Yk cr:Zk`). On terminals
+  ≥100 characters wide, tokens appear inline; on narrower terminals they
+  display on the next line with 8-space indentation. Rows with all-zero
+  tokens omit the column (no visual clutter).
 - **Panel focus-based key routing** — clicking the Flowchart panel routes
   `↑`/`↓`/`j`/`k` to canvas scroll; clicking the Timeline panel routes them to
   DataTable cursor movement. Default at startup is Flowchart. Active panel is

@@ -24,8 +24,22 @@ user-visible behavior changes, PATCH bumps ship fixes only.
   Tool Usage+MCP+Hooks / Tool Calls DataTable. Each region gets `height: 1fr`
   so no section can crowd out the others. Display caps (`+N more`) removed —
   all items are fully visible via per-section scroll.
+- **Agents/Skills per-agent token usage display** — Each agent and skill
+  in the Agents-Skills section now shows inline token consumption
+  (`in:Xk out:Yk cr:Zk`) when the terminal width is ≥100 characters;
+  narrower terminals display tokens on the next line with 8-space
+  indentation. Tokens are calculated per-agent node (including nested
+  agents within skill spans), matching the token tree hierarchy.
+  All-zero token rows omit the column entirely (no visual noise).
 
 ### Fixed
+
+- **Prompt truncation in TurnSummaryScreen** — User prompts were capped
+  at 500 characters in the parser, truncating long prompts with XML
+  wrappers and multi-line formatting. Parser now applies the relaxed
+  10,000-character cap to real user prompts only (filtering out
+  meta/sidechain rows), preserving full prompt text for the Turn Summary
+  modal while maintaining memory bounds for non-prompt message types.
 
 - **Flow mode: running parent now links to spawned child** — When agent A is
   still running as it spawns B in a later turn, B's parent edge now correctly

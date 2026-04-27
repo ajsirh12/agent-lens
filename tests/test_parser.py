@@ -221,3 +221,122 @@ def test__empty_blocks_no_crash() -> None:
     # Must not raise.
     events = parse_line(json.dumps(row))
     assert isinstance(events, list)
+
+
+# --- User prompt cap relaxation (turn-detail-tokens F1) ---
+
+
+def test_user_prompt_text_preserved_above_legacy_500_cap() -> None:
+    """Real user prompts (top_type=user, not isMeta, not isSidechain) keep
+    up to _USER_PROMPT_MAX_LEN chars instead of the legacy 500-char cap.
+
+    Uses 1500-char prompt as a representative value safely above 500 and
+    well below 10_000.
+    """
+    big_prompt = "u" * 1500
+    row = {
+        "type": "user",
+        "sessionId": "sess-prompt",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-prompt",
+        "isSidechain": False,
+        "isMeta": False,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": big_prompt}],
+        },
+    }
+    events = parse_line(json.dumps(row))
+    assert len(events) == 1
+    assert events[0].type == EventType.user_message
+    assert len(events[0].payload["text"]) == 1500
+    assert events[0].payload["text"] == big_prompt
+
+
+def test_assistant_text_still_capped_at_500() -> None:
+    """Assistant text blocks must keep the legacy 500-char cap even after
+    the user-prompt relaxation (regression guard).
+    """
+    big_text = "a" * 1500
+    row = {
+        "type": "assistant",
+        "sessionId": "sess-asst",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-asst",
+        "isSidechain": False,
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "text", "text": big_text}],
+        },
+    }
+    events = parse_line(json.dumps(row))
+    assert len(events) == 1
+    assert events[0].type == EventType.assistant_message
+    assert len(events[0].payload["text"]) == 500
+
+
+def test_meta_user_text_still_capped_at_500() -> None:
+    """isMeta=True user rows are system-injected notices, not real prompts,
+    and must keep the 500-char cap (regression guard).
+    """
+    big_text = "m" * 1500
+    row = {
+        "type": "user",
+        "sessionId": "sess-meta",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-meta",
+        "isSidechain": False,
+        "isMeta": True,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": big_text}],
+        },
+    }
+    events = parse_line(json.dumps(row))
+    assert len(events) == 1
+    assert len(events[0].payload["text"]) == 500
+
+
+def test_sidechain_user_text_still_capped_at_500() -> None:
+    """Sidechain user rows are sub-agent prompts, not main-session prompts,
+    and must keep the 500-char cap (regression guard).
+    """
+    big_text = "s" * 1500
+    row = {
+        "type": "user",
+        "sessionId": "sess-side",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-side",
+        "parentUuid": "parentuuid-aaa",
+        "isSidechain": True,
+        "isMeta": False,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": big_text}],
+        },
+    }
+    events = parse_line(json.dumps(row))
+    assert len(events) == 1
+    assert len(events[0].payload["text"]) == 500
+
+
+def test_user_prompt_caps_at_user_prompt_max_len() -> None:
+    """User prompts longer than _USER_PROMPT_MAX_LEN (10_000) get capped."""
+    from agentlens.parser import _USER_PROMPT_MAX_LEN
+
+    big_prompt = "z" * (_USER_PROMPT_MAX_LEN + 5_000)
+    row = {
+        "type": "user",
+        "sessionId": "sess-overflow",
+        "timestamp": "2026-04-08T10:00:00Z",
+        "uuid": "uuid-overflow",
+        "isSidechain": False,
+        "isMeta": False,
+        "message": {
+            "role": "user",
+            "content": [{"type": "text", "text": big_prompt}],
+        },
+    }
+    events = parse_line(json.dumps(row))
+    assert len(events) == 1
+    assert len(events[0].payload["text"]) == _USER_PROMPT_MAX_LEN

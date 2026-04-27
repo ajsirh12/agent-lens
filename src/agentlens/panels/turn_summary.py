@@ -95,6 +95,29 @@ def _has_tokens(tokens: dict) -> bool:
     return sum(int(tokens.get(k, 0) or 0) for k in ("input", "output", "cache_read", "cache_create")) > 0
 
 
+def _fmt_inline_tokens(tokens: dict | None) -> str:
+    """Compact one-line token summary for Agents/Skills row inline display.
+
+    Returns "" when all tokens are zero so callers can omit the column.
+    Format: "in:1.2k out:450 cr:28k cw:5.6k" (cw omitted if zero).
+    """
+    if not tokens:
+        return ""
+    try:
+        inp = int(tokens.get("input", 0) or 0)
+        out = int(tokens.get("output", 0) or 0)
+        cr = int(tokens.get("cache_read", 0) or 0)
+        cw = int(tokens.get("cache_create", 0) or 0)
+    except (TypeError, ValueError):
+        return ""
+    if inp + out + cr + cw <= 0:
+        return ""
+    parts = [f"in:{_fmt_tokens(inp)}", f"out:{_fmt_tokens(out)}", f"cr:{_fmt_tokens(cr)}"]
+    if cw > 0:
+        parts.append(f"cw:{_fmt_tokens(cw)}")
+    return " ".join(parts)
+
+
 def _fmt_token_row(label: str, tokens: dict, bold: bool = False, dim: bool = False, indent: int = 2) -> str:
     pad = " " * indent
     label_width = 22 - (indent - 2)
@@ -159,8 +182,16 @@ def _build_header_lines(s: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _build_agents_lines(s: dict[str, Any]) -> list[str]:
-    """Build agents section: agent time + Agents/Skills list."""
+_AGENTS_INLINE_THRESHOLD = 100  # term_width >= → inline tokens; < → indented next line
+
+
+def _build_agents_lines(s: dict[str, Any], term_width: int = 0) -> list[str]:
+    """Build agents section: agent time + Agents/Skills list.
+
+    term_width: terminal width used to decide inline vs next-line token
+    placement. 0 (default) preserves the legacy no-tokens behaviour for
+    callers that don't supply a width.
+    """
     lines: list[str] = []
 
     duration = float(s.get("duration_s", 0.0))
@@ -198,11 +229,20 @@ def _build_agents_lines(s: dict[str, Any]) -> list[str]:
             elif status == "running":
                 status_tag = " [green]▶[/green]"
             shown_desc = desc if desc else label
-            lines.append(
+            base_line = (
                 f"  [{prefix}] {shown_desc} "
                 f"[dim]({label})[/dim] "
                 f"[{dur}]{bg_tag}{status_tag}"
             )
+            tokens = a.get("tokens") or {}
+            token_col = _fmt_inline_tokens(tokens)
+            if not token_col:
+                lines.append(base_line)
+            elif term_width >= _AGENTS_INLINE_THRESHOLD:
+                lines.append(f"{base_line}    [dim]{token_col}[/dim]")
+            else:
+                lines.append(base_line)
+                lines.append(f"        [dim]{token_col}[/dim]")
 
     return lines
 
@@ -415,6 +455,11 @@ class TurnSummaryScreen(Screen[None]):
         min-height: 3;
         padding: 0 2;
         border-bottom: solid $accent-darken-2;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+    #turn-section-prompt Static {
+        width: 100%;
     }
     #turn-section-tokens {
         height: 1fr;
@@ -454,9 +499,14 @@ class TurnSummaryScreen(Screen[None]):
     def compose(self) -> ComposeResult:
         from datetime import datetime, timezone
 
+        try:
+            term_width = int(self.app.size.width)
+        except Exception:
+            term_width = 0
+
         header_lines = _build_header_lines(self.summary)
         token_lines = _build_token_lines(self.summary)
-        agents_lines = _build_agents_lines(self.summary)
+        agents_lines = _build_agents_lines(self.summary, term_width=term_width)
         tool_usage_lines = _build_tool_usage_lines(self.summary)
         tool_timeline = self.summary.get("tool_timeline", []) or []
 

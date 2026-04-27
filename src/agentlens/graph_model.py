@@ -30,6 +30,7 @@ class TurnRecord:
     start_ts: float     # timestamp of the user_message that started this turn
     end_ts: float | None = None  # timestamp of next turn's start (None = current/live)
     prompt_preview: str = ""     # first 40 chars of user prompt
+    prompt_full: str = ""        # full user prompt (capped upstream by parser._USER_PROMPT_MAX_LEN)
     # Per-turn aggregates (all capped at MAX_BREAKDOWN_TOOLS for dict
     # fields; raw hookInfos snapshot capped at MAX_HOOK_INFOS). Agent /
     # Task / Skill and MCP tools are NOT counted in tool_calls.
@@ -385,13 +386,15 @@ class CallGraph:
                 return False
             # Close the previous turn and open a new one.
             ts_epoch = ev.ts.timestamp() if ev.ts is not None else 0.0
-            prompt_text = str(ev.payload.get("text", ""))[:40]
+            raw_text = str(ev.payload.get("text", ""))
+            prompt_text = raw_text[:40]
             if self._turns:
                 self._turns[-1].end_ts = ts_epoch
             self._turns.append(TurnRecord(
                 index=len(self._turns),
                 start_ts=ts_epoch,
                 prompt_preview=prompt_text,
+                prompt_full=raw_text,
             ))
             self._current_turn_index = len(self._turns) - 1
             # New user turn — flush the sticky-running set so nodes from
@@ -1095,6 +1098,12 @@ class CallGraph:
             skill_count = 0
             error_count = 0
             total_agent_duration = 0.0
+            token_skill_tree_src = (
+                turn.token_skill_tree if turn is not None else {}
+            )
+            token_agents_standalone_src = (
+                turn.token_agents_standalone if turn is not None else {}
+            )
             for r in recs:
                 if r.node_type == "agent":
                     agent_count += 1
@@ -1109,10 +1118,16 @@ class CallGraph:
                 agents.append({
                     "label": r.label,
                     "description": r.description,
+                    "node_id": r.node_id,
                     "node_type": r.node_type,
                     "duration_s": dur,
                     "status": r.status,
                     "is_background": r.is_background,
+                    "tokens": self._build_agent_tokens(
+                        r.node_id,
+                        token_skill_tree_src,
+                        token_agents_standalone_src,
+                    ),
                 })
 
             # Per-turn tool / mcp / hook aggregates (additive only —
@@ -1201,7 +1216,10 @@ class CallGraph:
 
             return {
                 "index": turn_index,
-                "prompt": turn.prompt_preview if turn is not None else "",
+                "prompt": (
+                    (turn.prompt_full or turn.prompt_preview)
+                    if turn is not None else ""
+                ),
                 "start_ts": turn.start_ts if turn is not None else 0.0,
                 "end_ts": turn.end_ts if turn is not None else None,
                 "duration_s": duration,
@@ -1349,6 +1367,61 @@ class CallGraph:
     # ------------------------------------------------------------------
     # Per-turn tool / hook accumulators
     # ------------------------------------------------------------------
+    @staticmethod
+    def _build_agent_tokens(
+        node_id: str,
+        token_skill_tree: dict,
+        token_agents_standalone: dict,
+    ) -> dict:
+        """Resolve per-node tokens by matching ``node_id`` against the
+        skill tree's nested agents and the standalone-agent bucket. Also
+        matches skill node ids against ``token_skill_tree[*].total``.
+
+        Never raises. Missing/None token components coerce to 0.
+        """
+        zero = {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}
+
+        def _coerce(d) -> dict:
+            if not isinstance(d, dict):
+                return dict(zero)
+            out = {}
+            for k in ("input", "output", "cache_read", "cache_create"):
+                v = d.get(k)
+                try:
+                    n = int(v) if v is not None else 0
+                except (TypeError, ValueError):
+                    n = 0
+                out[k] = n if n > 0 else 0
+            return out
+
+        try:
+            # Skill node — read from token_skill_tree[node_id].total.tokens.
+            if isinstance(token_skill_tree, dict):
+                skill_entry = token_skill_tree.get(node_id)
+                if isinstance(skill_entry, dict):
+                    total = skill_entry.get("total") or {}
+                    if isinstance(total, dict):
+                        return _coerce(total.get("tokens"))
+                # Agent node nested inside a skill — search each skill's
+                # agents map.
+                for entry in token_skill_tree.values():
+                    if not isinstance(entry, dict):
+                        continue
+                    agents_map = entry.get("agents") or {}
+                    if not isinstance(agents_map, dict):
+                        continue
+                    a_entry = agents_map.get(node_id)
+                    if isinstance(a_entry, dict):
+                        return _coerce(a_entry.get("tokens"))
+            # Standalone agent.
+            if isinstance(token_agents_standalone, dict):
+                a_entry = token_agents_standalone.get(node_id)
+                if isinstance(a_entry, dict):
+                    return _coerce(a_entry.get("tokens"))
+        except Exception:
+            pass  # never-raise
+        return dict(zero)
+
     @staticmethod
     def _bump_capped(
         d: dict[str, int],
