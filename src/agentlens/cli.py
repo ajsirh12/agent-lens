@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip the session picker and auto-attach to the newest JSONL.",
     )
+    p.add_argument(
+        "--replay",
+        type=Path,
+        metavar="FILE",
+        help="Open a past session JSONL file in replay mode.",
+    )
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -52,11 +58,16 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
+    if args.session and args.replay:
+        print("Error: --session and --replay cannot be used together.", file=sys.stderr)
+        return 1
+
     # Import lazily so --help works without textual installed.
     from .app import AgentlensApp
 
     app = AgentlensApp(
         session_override=args.session,
+        replay_path=args.replay,
         project_root=args.project_root,
         state_dir_override=args.state_dir,
         self_test=args.self_test,

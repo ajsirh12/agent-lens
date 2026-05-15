@@ -215,3 +215,44 @@ def make_tailer(path: Path) -> SessionWatcher:
         return WatchfilesTailer(path)
     except ImportError:
         return PollingTailer(path)
+
+
+class ReplayPlayer(SessionWatcher):
+    """Reads an entire JSONL file in async chunks then exits — no tail."""
+
+    CHUNK_LINES = 100
+
+    async def run(
+        self,
+        app: "AgentlensApp | None" = None,
+        bus: EventBus | None = None,
+        stop_event: asyncio.Event | None = None,
+    ) -> None:
+        try:
+            with self.path.open("r", encoding="utf-8", errors="replace") as f:
+                chunk: list[str] = []
+                for idx, raw in enumerate(f, 1):
+                    if stop_event is not None and stop_event.is_set():
+                        return
+                    chunk.append(raw)
+                    if idx % self.CHUNK_LINES == 0:
+                        for line in chunk:
+                            await self._deliver_line(line, app, bus)
+                        chunk.clear()
+                        await asyncio.sleep(0)
+                for line in chunk:
+                    await self._deliver_line(line, app, bus)
+        except OSError as exc:
+            if app is not None:
+                from .messages import ReplayErrorMessage
+
+                app.post_message(ReplayErrorMessage(str(exc)))
+
+    async def _deliver_line(
+        self,
+        raw: str,
+        app: "AgentlensApp | None",
+        bus: EventBus | None,
+    ) -> None:
+        for ev in parse_line(raw):
+            await self._deliver(ev, app, bus)

@@ -77,6 +77,29 @@ SessionPickerScreen {
     max-height: 20;
 }
 
+ReplayPickerScreen {
+    align: center middle;
+}
+
+#replay-picker-dialog {
+    width: 90;
+    max-width: 95%;
+    height: auto;
+    max-height: 80%;
+    border: thick $accent;
+    background: $panel;
+    padding: 1 2;
+}
+
+#replay-picker-title {
+    padding-bottom: 1;
+}
+
+#replay-list {
+    height: auto;
+    max-height: 20;
+}
+
 SessionPathInputScreen {
     align: center middle;
 }
