@@ -2,9 +2,13 @@
 
 [한국어](docs/README.ko.md)
 
-Live-tail TUI for Claude Code sessions. Shows a Timeline of tool calls
-alongside a real-time Flowchart of agent and skill spawns, including
-nested subagent trees and parallel-instance views.
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+Live-tail TUI for Claude Code sessions. Watch every tool call, agent spawn,
+and subagent tree unfold in real time — without touching your Claude Code
+workflow.
 
 ```
 ┌──────────────────────────────────────┬──────────────────────────────────────┐
@@ -28,87 +32,25 @@ nested subagent trees and parallel-instance views.
 
 ## Features
 
-- **Live tail** of the main Claude Code session JSONL via `watchfiles`
-  (with stdlib polling fallback) — new events appear within ~1 second.
-- **Timeline panel**: scrollable DataTable of turn markers (ts /
-  Turn N / prompt preview / tool count / duration). Press Enter on
-  any row to open TurnSummaryScreen with the individual tool call
-  breakdown for that turn.
-- **Flowchart panel**: live directed graph of Agent/Task/Skill calls,
-  with parent/child edges, (xN) duplicate counters, per-subagent
-  tool breakdown badges (e.g. `Rd12 Ed5`), and color-coded status
-  (running / done / error).
-- **True nested subagent tree** up to depth 5: if a subagent spawns
-  another subagent via Skill, the nested spawn shows up as a child
-  node in the flowchart instead of collapsing onto `main`.
-- **Mode-dependent instance view**: in `[running]` mode, parallel
-  spawns of the same agent type render as distinct boxes with
-  per-instance tool counts; in `[all]` mode they aggregate into a
-  single box with a `(xN)` counter and summed breakdown.
-- **Sticky running**: a node stays visually green until the next real
-  user prompt, so fast agents don't flicker into "done" before you
-  notice them. Background task notifications, hook reminders, and
-  subagents' own user rows are filtered out of the flush logic.
-- **Per-instance drill-down** (`d` key): open a modal listing the
-  specific tool history of the clicked parallel instance — each
-  instance opens its own subagent JSONL file.
-- **Three orthogonal toggles**:
-  - `m` — mode (all ↔ running only)
-  - `o` — orientation (top-down ↔ left-right)
-  - `p` — panes (horizontal ↔ vertical)
-- **Scrollable flowchart** with mouse wheel + keyboard (PgUp/PgDn,
-  Shift+H/L, Home/End).
-- **Session picker** at launch when multiple JSONLs exist in the
-  same slug directory. `--latest` bypasses it. Press `s` during
-  runtime to switch to a different session in the same directory
-  without restarting — Timeline and Flowchart rebuild for the new
-  session automatically.
-- **Paste-a-path escape hatch via `Shift+S`.** Opens an Input
-  modal that accepts either a full JSONL path or a bare session
-  id / prefix (`b0709256`). Glob-resolves the id across every
-  project subdir and attaches the match, so you can recover the
-  right session even when the slug-based picker fails (e.g. on
-  Windows / git-bash where the path format differs).
-- **Windows / git-bash compatibility**: the locator falls back to
-  matching each JSONL's recorded `cwd` field when the slug
-  directory lookup misses (backslash paths, MSYS2 `/c/…` paths,
-  case differences — all normalised automatically). Sessions still
-  resolve on Windows even when the slug-based picker fails. See the
-  [Windows notes](#windows--git-bash) section below.
-- **Subagent watcher** automatically discovers and tails new
-  `agent-*.jsonl` files as they're created under the session's
-  `subagents/` directory. Team agents spawned via
-  `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` are resolved by OMC name
-  (e.g. `verifier-a`, `executor`) from `.meta.json` sidecars.
-- **Turn Summary — Token Usage breakdown** (v0.8.1): Turn Summary modal
-  shows per-skill and per-agent token consumption in a hierarchy. Skill
-  spans list their sub-agents with 4-space indentation; standalone agents
-  appear under a separate `agents (N)` section. Double-counting is
-  prevented — `Total` is the leaf sum only.
-- **TurnSummaryScreen fixed header and prompt section** (v0.9.8+): the Turn /
-  Duration·Agents·Skills·Errors / token summary line (`Tokens: Xk in /
-  Yk out / ...`) are pinned to the top of the modal. The body is split
-  into five independent scroll sections: **Prompt** / **Token Usage** / **Agents·Skills** /
-  **Tool Usage+MCP+Hooks** / **Tool Calls DataTable** — each section gets
-  `height: 1fr` so no section crowds out the others. All items are fully
-  visible via per-section scroll; display caps (`+N more`) removed. The full
-  user prompt is displayed in the dedicated Prompt section with multi-line
-  formatting preserved; rich markup characters are rendered as plain text.
-- **Per-agent token display in Agents/Skills section** — Each agent and
-  skill row now shows token consumption (`in:Xk out:Yk cr:Zk`). On terminals
-  ≥100 characters wide, tokens appear inline; on narrower terminals they
-  display on the next line with 8-space indentation. Rows with all-zero
-  tokens omit the column (no visual clutter).
-- **Panel focus-based key routing** — clicking the Flowchart panel routes
-  `↑`/`↓`/`j`/`k` to canvas scroll; clicking the Timeline panel routes them to
-  DataTable cursor movement. Default at startup is Flowchart. Active panel is
-  highlighted with a green border.
-- **Activity Sparkline** in the status footer: a rolling 8-bar histogram of
-  events/sec over the last 60 seconds using block characters (▁▂▃▄▅▆▇█),
-  with a `peak: N/s` label. Auto-suppressed on narrow terminals.
-- **Defensive**: schema-tolerant parser (never raises on unknown
-  fields), MAX_NODES / MAX_BUFFER_BYTES / MAX_RAW_LINE caps against
-  adversarial input, ANSI escape sanitization for terminal safety.
+- **Live tail** — new events from the Claude Code session JSONL appear within
+  ~1 second via `watchfiles` (stdlib polling fallback included).
+- **Timeline panel** — scrollable table of turns with prompt preview, tool
+  count, and duration. Press `Enter` to open a turn detail modal with full
+  prompt, token usage, and per-tool breakdown.
+- **Flowchart panel** — directed graph of Agent/Task/Skill calls with
+  parent/child edges, `(xN)` duplicate counters, per-subagent tool badges
+  (e.g. `Rd12 Ed5`), and color-coded running/done/error status.
+- **Nested subagent tree** up to depth 5 — subagents that spawn further
+  subagents via Skill appear as proper child nodes, not collapsed onto `main`.
+- **Parallel-instance view** — in `[running]` mode each parallel spawn is a
+  distinct box; in `[all]` mode they aggregate with a `(xN)` counter. Press
+  `d` to drill into a specific instance's tool history.
+- **Session switching** — press `s` to switch sessions without restarting;
+  `Shift+S` to paste a path or UUID directly. Windows / git-bash path formats
+  are normalised automatically.
+
+See [`docs/USAGE.md`](docs/USAGE.md) for the full feature list, key bindings,
+mode semantics, and architecture notes.
 
 ## Install
 
@@ -168,10 +110,6 @@ $env:AGENTLENS_BACKEND="polling"; agentlens
 set AGENTLENS_BACKEND=polling && agentlens
 ```
 
-See [`docs/USAGE.md`](docs/USAGE.md) for the full usage guide,
-including key bindings, mode semantics, drill-down flow, and
-architecture notes.
-
 ## Windows / git-bash
 
 The slug directory that Claude Code creates for a project is derived
@@ -202,49 +140,9 @@ tell agentlens which directory to compute the slug from.
 ## Tests
 
 ```bash
-pytest -q           # 318 tests
+pytest -q
 ```
 
-## Manual Verification
-
-The Definition of Done from the original spec tracked two manual
-checks beyond the automated suite.
-
-### M-AC8-idle (footer shows `— session idle` after >30s)
-
-**Status:** PASSED — covered by automated tests in
-`tests/test_idle_footer.py` (4 tests, all green). The tests
-monkeypatch `time.monotonic` and exercise `_refresh_idle_footer`
-directly, covering the positive case, the < 30s negative case,
-the fresh-session (no event yet) edge case, and the exact
-boundary at 30.000 vs 30.001 seconds.
-
-### M-AC11 (idle CPU ≤ 2%)
-
-**Status:** PASSED — measured 2026-04-09.
-
-Measurement procedure: `agentlens` spawned via `pty.fork()`
-inside a Python harness, attached to an empty session file with
-`AGENTLENS_BACKEND=polling`, sampled via `ps -o pcpu=` once per
-second for 10 seconds after a 3-second mount delay.
-
-Results:
-
-| Metric | Value | Target |
-|--------|-------|--------|
-| Idle CPU average (10s window) | **0.16 %** | ≤ 2 % |
-| Idle CPU max (10s window) | **0.30 %** | ≤ 2 % |
-| RSS | **40.7 MB** | — |
-
-Well under the target with headroom to spare. Re-measure if the
-polling loop or set_interval rate is ever changed.
-
-## Status
-
-Unreleased — TurnSummaryScreen prompt section (full user prompt in dedicated
-scroll section at body top with multi-line preservation). Header trimmed to
-Turn / Duration / Tokens (3 lines). Five independent scroll sections total.
-Timeline auto-scroll to latest turn on startup. Flowchart layout coalescing
-for fast startup. 318 tests passing.
+## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
