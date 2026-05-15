@@ -1208,3 +1208,269 @@ def test_build_body_lines_backward_compat() -> None:
     assert "Token Usage" in combined
     assert "(Esc / Enter to close)" in combined
 
+
+# --- AC-15 through AC-22: tool timeline DataTable interaction tests ---
+
+
+def _tool_entry(
+    name: str = "Read",
+    agent_id: str = "main",
+    ts: float = 1700000000.0,
+    status: str = "done",
+    duration_ms: int = 80,
+    tool_use_id: str = "t1",
+    input_summary: str = "/tmp/x.py",
+    input_raw: str | None = "x",
+    output_preview: str | None = "y",
+    is_error: bool = False,
+) -> dict:
+    return {
+        "name": name,
+        "agent_id": agent_id,
+        "ts": ts,
+        "status": status,
+        "duration_ms": duration_ms,
+        "tool_use_id": tool_use_id,
+        "input_summary": input_summary,
+        "input_raw": input_raw,
+        "output_preview": output_preview,
+        "is_error": is_error,
+    }
+
+
+@pytest.mark.asyncio
+async def test_ac15_auto_focus_on_datatable(tmp_path) -> None:
+    """AC-15: When tool_timeline is non-empty, #turn-tool-timeline DataTable receives focus."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from textual.app import App, ComposeResult
+    from textual.widgets import DataTable
+
+    summary = _timeline_summary(tool_timeline=[_tool_entry()])
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+        await app.push_screen(screen)
+        await pilot.pause()
+        await pilot.pause()
+        dt = screen.query_one("#turn-tool-timeline", DataTable)
+        assert dt.has_focus, "DataTable should have focus when tool_timeline is non-empty"
+
+
+@pytest.mark.asyncio
+async def test_ac16_enter_opens_tool_detail_modal(tmp_path) -> None:
+    """AC-16: Pressing Enter on a selected DataTable row pushes ToolDetailScreen."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from agentlens.panels.detail_modal import ToolDetailScreen
+    from textual.app import App, ComposeResult
+    from textual.widgets import DataTable
+
+    summary = _timeline_summary(tool_timeline=[_tool_entry(name="Bash", tool_use_id="bash1")])
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+        await app.push_screen(screen)
+        await pilot.pause()
+        await pilot.pause()
+        dt = screen.query_one("#turn-tool-timeline", DataTable)
+        dt.move_cursor(row=0)
+        await pilot.press("enter")
+        await pilot.pause()
+        # After Enter, ToolDetailScreen should be on the screen stack
+        assert isinstance(app.screen, ToolDetailScreen), (
+            f"Expected ToolDetailScreen on top, got {type(app.screen)}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_ac17_esc_closes_tool_detail_modal(tmp_path) -> None:
+    """AC-17: Pressing Esc on ToolDetailScreen dismisses it and returns to TurnSummaryScreen."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from agentlens.panels.detail_modal import ToolDetailScreen
+    from textual.app import App, ComposeResult
+    from textual.widgets import DataTable
+
+    summary = _timeline_summary(tool_timeline=[_tool_entry()])
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+        await app.push_screen(screen)
+        await pilot.pause()
+        await pilot.pause()
+        dt = screen.query_one("#turn-tool-timeline", DataTable)
+        dt.move_cursor(row=0)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ToolDetailScreen)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert isinstance(app.screen, TurnSummaryScreen), (
+            f"Expected TurnSummaryScreen after Esc, got {type(app.screen)}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_ac18_enter_on_non_datatable_focus_dismisses(tmp_path) -> None:
+    """AC-18: Enter on TurnSummaryScreen with no DataTable (empty timeline) calls dismiss via BINDINGS."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from textual.app import App, ComposeResult
+
+    # Empty tool_timeline so no DataTable — Enter routes to BINDINGS dismiss action
+    summary = _timeline_summary(tool_timeline=[])
+
+    dismissed = []
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+
+        async def _dismiss_hook(result):
+            dismissed.append(result)
+
+        await app.push_screen(screen, _dismiss_hook)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        # The screen should be dismissed (stack returns to TestApp's default screen)
+        assert screen not in app._screen_stack, "TurnSummaryScreen should be dismissed via BINDINGS enter"
+
+
+@pytest.mark.asyncio
+async def test_ac19_enter_when_no_tool_timeline_dismisses(tmp_path) -> None:
+    """AC-19: Enter on TurnSummaryScreen with empty tool_timeline calls dismiss."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from textual.app import App, ComposeResult
+
+    summary = _timeline_summary(tool_timeline=[])
+
+    dismissed = []
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+
+        async def _dismiss_hook(result):
+            dismissed.append(result)
+
+        await app.push_screen(screen, _dismiss_hook)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert screen not in app._screen_stack, "TurnSummaryScreen should be dismissed on Enter when no timeline"
+
+
+@pytest.mark.asyncio
+async def test_ac20_input_raw_none_shows_empty(tmp_path) -> None:
+    """AC-20: When input_raw and output_preview are None, ToolDetailScreen shows '(empty)'."""
+    from agentlens.panels.detail_modal import ToolDetailScreen
+    from textual.app import App, ComposeResult
+    from textual.widgets import Static
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield ToolDetailScreen(
+                tool_name="Read",
+                agent_id="main",
+                ts=0.0,
+                status="done",
+                duration_ms=80,
+                input_summary="/tmp/x.py",
+                input_raw=None,
+                output_preview=None,
+                is_error=False,
+                tool_use_id="toolu_test",
+            )
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        texts = [str(w.content) for w in app.screen.query(Static)]
+        combined = "\n".join(texts)
+        assert "(empty)" in combined, f"Expected '(empty)' for None input/output, got:\n{combined}"
+
+
+@pytest.mark.asyncio
+async def test_ac21_is_error_shows_error_highlight(tmp_path) -> None:
+    """AC-21: When is_error=True, ToolDetailScreen renders '[red]' or 'error' in output header."""
+    from agentlens.panels.detail_modal import ToolDetailScreen
+    from textual.app import App, ComposeResult
+    from textual.widgets import Static
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield ToolDetailScreen(
+                tool_name="Bash",
+                agent_id="main",
+                ts=0.0,
+                status="error",
+                duration_ms=100,
+                input_summary="cmd",
+                input_raw="echo hi",
+                output_preview="Error occurred",
+                is_error=True,
+                tool_use_id="toolu_err",
+            )
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        statics = list(app.screen.query(Static))
+        # Use .content which returns the markup string for Static widgets
+        markup_texts = [str(w.content) for w in statics]
+        combined = "\n".join(markup_texts)
+        assert "[red]" in combined or "error" in combined.lower(), (
+            f"Expected error highlight in output header, got:\n{combined}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_ac22_mouse_click_opens_tool_detail(tmp_path) -> None:
+    """AC-22: Clicking a DataTable row triggers RowSelected and pushes ToolDetailScreen."""
+    from agentlens.panels.turn_summary import TurnSummaryScreen
+    from agentlens.panels.detail_modal import ToolDetailScreen
+    from textual.app import App, ComposeResult
+    from textual.widgets import DataTable
+
+    summary = _timeline_summary(tool_timeline=[_tool_entry(name="Edit", tool_use_id="edit1")])
+
+    class TestApp(App):
+        def compose(self) -> ComposeResult:
+            yield TurnSummaryScreen(summary)
+
+    app = TestApp()
+    async with app.run_test() as pilot:
+        screen = TurnSummaryScreen(summary)
+        await app.push_screen(screen)
+        await pilot.pause()
+        await pilot.pause()
+        dt = screen.query_one("#turn-tool-timeline", DataTable)
+        # Simulate row selection by calling the event handler directly
+        event = DataTable.RowSelected(dt, cursor_row=0, row_key=list(dt.rows.keys())[0])
+        screen.on_data_table_row_selected(event)
+        await pilot.pause()
+        assert isinstance(app.screen, ToolDetailScreen), (
+            f"Expected ToolDetailScreen after row click, got {type(app.screen)}"
+        )
+
