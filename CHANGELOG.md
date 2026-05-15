@@ -12,6 +12,26 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ### Added
 
+- **Replay mode** — load past Claude Code session JSONL files for static
+  browsing without a live connection. Two entry points:
+  - CLI: `agentlens --replay /path/to/session.jsonl` (mutually exclusive
+    with `--session`)
+  - In-app: press `r` to open `ReplayPickerScreen`, a modal `ListView` of
+    recent JSONLs under `~/.claude/projects/` sorted by mtime. `Shift+S`
+    remains available as a path-input fallback.
+  Loading is async (100-line chunks with `asyncio.sleep(0)` yield points)
+  so the UI stays responsive on large files. Timeline + Flowchart render
+  the entire session identically to live mode. The footer shows a
+  `[REPLAY]` badge in place of the live-session locator info. Press
+  `Esc` to exit replay and re-attach to the live session.
+- **`ReplayPlayer(SessionWatcher)`** in `watcher.py` — drives chunked
+  ingestion of a static JSONL into the same event pipeline used by the
+  live tailer.
+- **`ReplayPickerScreen`** in `panels/replay_picker.py` — recent-sessions
+  modal picker.
+- **`ReplayErrorMessage`** in `messages.py` — surfaces replay load
+  failures (missing file, malformed JSONL) as toast notifications without
+  crashing the app.
 - **Tool Call Detail modal** — Select a tool call in the Tool Calls section
   of TurnSummaryScreen and press `Enter` to open a detail modal. The modal
   displays the tool name, agent, status, duration, and timestamp. Input

@@ -18,3 +18,11 @@ class HarnessEventMessage(Message):
     def __init__(self, event: HarnessEvent) -> None:
         self.event = event
         super().__init__()
+
+
+class ReplayErrorMessage(Message):
+    """Signals a file I/O error during replay; never-raise boundary."""
+
+    def __init__(self, error: str) -> None:
+        self.error = error
+        super().__init__()

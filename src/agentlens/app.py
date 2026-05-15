@@ -15,9 +15,10 @@ from textual.worker import Worker
 
 from .activity_rate import ActivityRate
 from .locator import SessionLocator
-from .messages import HarnessEventMessage
+from .messages import HarnessEventMessage, ReplayErrorMessage
 from .omc_state import OmcStateReader
 from .panels.flowchart import FlowchartPanel
+from .panels.replay_picker import ReplayPickerScreen
 from .panels.session_path_input import SessionPathInputScreen
 from .panels.session_picker import SessionPickerScreen
 from .panels.subagent_detail import SubagentDetailScreen
@@ -25,7 +26,7 @@ from .panels.timeline import TimelinePanel
 from .parser import parse_line
 from .subagent_locator import SubagentLocator
 from .subagent_watcher import SubagentWatcherManager
-from .watcher import SessionWatcher, make_tailer
+from .watcher import ReplayPlayer, SessionWatcher, make_tailer
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class AgentlensApp(App[int]):
         ("pagedown", "flowchart_scroll_down", "Flow ↓"),
         ("home", "flowchart_scroll_home", "Flow ⇱"),
         ("end", "flowchart_scroll_end", "Flow ⇲"),
+        ("r", "start_replay", "Replay session"),
         ("s", "switch_session", "Switch session"),
         # Bind BOTH forms: Textual's pilot.press("shift+s") synthesizes
         # the modifier-prefixed key directly, while a real terminal just
@@ -75,6 +77,7 @@ class AgentlensApp(App[int]):
         self,
         *,
         session_override: Path | None = None,
+        replay_path: Path | None = None,
         project_root: Path | None = None,
         state_dir_override: Path | None = None,
         self_test: bool = False,
@@ -90,6 +93,8 @@ class AgentlensApp(App[int]):
         self.auto_latest = auto_latest
         self.active_session_path: Path | None = None
         self.locator_reason: str = "none"
+        self._replay_mode: bool = replay_path is not None
+        self._replay_path: Path | None = replay_path
         self._timeline: TimelinePanel | None = None
         self._flowchart: FlowchartPanel | None = None
         self._footer: Static | None = None
@@ -111,6 +116,9 @@ class AgentlensApp(App[int]):
         yield self._footer
 
     async def on_mount(self) -> None:
+        if self._replay_path is not None:
+            self._enter_replay_mode(self._replay_path)
+            return
         # Resolve session path.
         if not self.no_attach:
             if self.session_override is not None:
@@ -172,16 +180,20 @@ class AgentlensApp(App[int]):
     def _start_session_workers(self, path: Path) -> None:
         """Spawn the main watcher + subagent manager for ``path``.
 
-        Idempotent when existing handles are present (won't double-spawn).
+        In replay mode, only a ReplayPlayer is spawned; subagent_manager is
+        skipped to maintain live/replay isolation.
         """
         if self._watcher is None:
-            self._watcher = make_tailer(path)
+            if self._replay_mode:
+                self._watcher = ReplayPlayer(path)
+            else:
+                self._watcher = make_tailer(path)
             self._watcher_worker = self.run_worker(
                 self._watcher.run(app=self, bus=None),
                 exclusive=False,
                 name="watcher",
             )
-        if not self.no_attach and self._subagent_manager is None:
+        if not self._replay_mode and not self.no_attach and self._subagent_manager is None:
             self._subagent_manager = SubagentWatcherManager(
                 main_session_path=path
             )
@@ -209,6 +221,69 @@ class AgentlensApp(App[int]):
             self._subagent_worker = None
         self._watcher = None
         self._subagent_manager = None
+
+    def _clear_panels(self) -> None:
+        """Reset timeline and flowchart state before loading a new session."""
+        try:
+            if self._timeline is not None:
+                self._timeline.clear()
+        except Exception:
+            pass
+        try:
+            if self._flowchart is not None:
+                self._flowchart.clear()
+        except Exception:
+            pass
+        self.last_event_monotonic = 0.0
+        self._activity = ActivityRate()
+        self.selected_agent_id = None
+        self.active_panel = "timeline"
+        self._active_turn = None
+
+    def _enter_replay_mode(self, path: Path) -> None:
+        """Switch to replay mode for the given JSONL path."""
+        self._stop_session_workers()
+        self._clear_panels()
+        self._replay_mode = True
+        self._replay_path = path
+        self.active_session_path = path
+        self.locator_reason = "replay"
+        self._update_footer()
+        if self.self_test:
+            return
+        self._start_session_workers(path)
+        if self._omc_reader is None:
+            self._omc_reader = OmcStateReader(self.state_dir)
+            self.run_worker(
+                self._omc_reader.run(app=self, bus=None),
+                exclusive=False,
+                name="omc_state",
+            )
+            self.set_interval(1.0, self._refresh_idle_footer)
+
+    def _exit_replay_mode(self) -> None:
+        """Return to live mode after replay. Re-discovers the active session."""
+        self._stop_session_workers()
+        self._clear_panels()
+        self._replay_mode = False
+        self._replay_path = None
+        self.active_session_path = None
+        self.locator_reason = "none"
+        self._update_footer()
+        if self.self_test or self.no_attach:
+            return
+        try:
+            locator = SessionLocator(
+                cwd=self.project_root or Path.cwd(),
+                projects_root=Path.home() / ".claude" / "projects",
+            )
+            self.active_session_path = locator.find_active()
+            self.locator_reason = locator.chosen_reason
+        except Exception:
+            pass
+        self._update_footer()
+        if self.active_session_path is not None:
+            self._start_session_workers(self.active_session_path)
 
     def _flowchart_counts_suffix(self) -> str:
         if self._flowchart is None:
@@ -278,6 +353,13 @@ class AgentlensApp(App[int]):
 
     def _update_footer(self) -> None:
         if self._footer is None:
+            return
+        if self._replay_mode and self.active_session_path is not None:
+            base = (
+                f"[REPLAY] {self.active_session_path.name}"
+                f"{self._flowchart_counts_suffix()}  (replay — no live tail)"
+            )
+            self._footer.update(base)
             return
         path = self._short_session_path()
         base = f"session: {path} [{self.locator_reason}]{self._flowchart_counts_suffix()}"
@@ -349,7 +431,31 @@ class AgentlensApp(App[int]):
             self.active_panel = "timeline"
 
     def action_escape_to_timeline(self) -> None:
+        if self._replay_mode:
+            self._exit_replay_mode()
+            return
         self.active_panel = "timeline"
+
+    def action_start_replay(self) -> None:
+        """r key: open ReplayPickerScreen; on selection enter replay mode."""
+        def _on_picked(result: Path | None) -> None:
+            if result is not None:
+                self._enter_replay_mode(result)
+            else:
+                # fallback: open SessionPathInputScreen for manual path entry
+                def _on_path_picked(chosen: Path | None) -> None:
+                    if chosen is not None:
+                        self._enter_replay_mode(chosen)
+                self.push_screen(SessionPathInputScreen(), _on_path_picked)
+
+        self.push_screen(ReplayPickerScreen(), _on_picked)
+
+    def on_replay_error_message(self, msg: ReplayErrorMessage) -> None:
+        try:
+            self.notify(f"Replay error: {msg.error}", severity="error")
+        except Exception:
+            pass
+        self._exit_replay_mode()
 
     def action_show_detail(self) -> None:
         if self._timeline is None:
