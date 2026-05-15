@@ -49,10 +49,6 @@ workflow.
 - **Session switching** — press `s` to switch sessions without restarting;
   `Shift+S` to paste a path or UUID directly. Windows / git-bash path formats
   are normalised automatically.
-- **Replay mode** — load any past Claude Code session JSONL for static
-  browsing. Launch with `agentlens --replay PATH`, or press `r` in-app to
-  pick from recent sessions. The footer shows a `[REPLAY]` badge; press
-  `Esc` to return to the live session.
 
 See [`docs/USAGE.md`](docs/USAGE.md) for the full feature list, key bindings,
 mode semantics, and architecture notes.
@@ -96,7 +92,6 @@ pip install -e '.[dev]'
 agentlens                            # auto-pick newest session in cwd's slug dir
 agentlens --latest                   # skip picker, take newest
 agentlens --session PATH             # attach a specific JSONL
-agentlens --replay PATH              # replay a past JSONL (no live tail)
 agentlens --project-root PATH        # compute slug from a different cwd
 agentlens --self-test                # render one frame, exit 0 (CI smoke)
 agentlens -v                         # verbose logging
