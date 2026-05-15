@@ -107,9 +107,15 @@ async def test_detail_modal_sanitizes_fields(tmp_path: Path) -> None:
 
         modal = ToolDetailScreen(
             tool_name="\x1b[31mbad\x1b[0m",
-            input_summary="\rfoo",
+            agent_id="main",
+            ts=0.0,
             status="ok",
-            duration_ms="42",
+            duration_ms=42,
+            input_summary="\rfoo",
+            input_raw=None,
+            output_preview=None,
+            is_error=False,
+            tool_use_id=None,
         )
 
         await app.push_screen(modal)

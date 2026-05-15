@@ -13,6 +13,8 @@ Filtering policy (locked decision):
 
 from __future__ import annotations
 
+import json
+import re
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -83,7 +85,12 @@ class TurnRecord:
     # Per-turn individual tool events for timeline display (capped at
     # MAX_TOOL_EVENTS). Each entry:
     #   {"ts": float, "name": str, "agent_id": str, "tool_use_id": str,
-    #    "status": "running"|"done"|"error", "duration_ms": int|None}
+    #    "status": "running"|"done"|"error", "duration_ms": int|None,
+    #    # Detail capture (additive; never None — empty string when absent):
+    #    "input_summary": str,    # max MAX_INPUT_SUMMARY chars
+    #    "input_raw": str,        # max MAX_INPUT_RAW chars
+    #    "output_preview": str,   # max MAX_OUTPUT_PREVIEW chars
+    #    "is_error": bool}
     # Populated by _handle_tool_use / _handle_tool_result.
     tool_events: list[dict] = field(default_factory=list)
     # Lookup index: tool_use_id -> index in tool_events list.
@@ -137,6 +144,157 @@ def _display_label(name: str) -> str:
     return name
 
 
+# Priority key order for input_summary extraction (FR-02). The first
+# matching key in this tuple wins; this lets us surface the most-likely
+# meaningful identifier (a path, a command, a query) without forcing
+# the caller to pre-sort keys.
+_INPUT_SUMMARY_PRIORITY_KEYS = (
+    "file_path", "path", "command", "pattern",
+    "prompt", "description", "query", "url",
+)
+
+
+def _strip_controls(s: str) -> str:
+    """Remove ANSI escapes / control chars from a string (FR-05).
+
+    Mirrors the defense applied in ``_sanitize_label`` / ``_sanitize_cell``
+    but keeps the result multi-line capable (so input_raw / output_preview
+    can preserve linebreaks for the modal viewer).
+    """
+    return _CONTROL_CHAR_RE.sub("", s)
+
+
+def _build_input_summary(inp: object) -> str:
+    """Single-line summary of ``tool_use.input`` for DataTable preview.
+
+    Tries priority keys (FR-02) first; falls back to ``repr(input)`` for
+    arbitrary dicts so something always renders. Capped at
+    MAX_INPUT_SUMMARY chars and stripped of control chars. Never raises.
+    """
+    try:
+        if inp is None:
+            return ""
+        if isinstance(inp, dict):
+            for key in _INPUT_SUMMARY_PRIORITY_KEYS:
+                if key in inp:
+                    try:
+                        val = inp[key]
+                    except Exception:
+                        continue
+                    try:
+                        text = str(val)
+                    except Exception:
+                        text = ""
+                    text = _strip_controls(text).replace("\n", " ").replace("\t", " ")
+                    return text[:MAX_INPUT_SUMMARY]
+            try:
+                text = repr(inp)
+            except Exception:
+                text = ""
+            text = _strip_controls(text).replace("\n", " ").replace("\t", " ")
+            return text[:MAX_INPUT_SUMMARY]
+        try:
+            text = str(inp)
+        except Exception:
+            try:
+                text = repr(inp)
+            except Exception:
+                return ""
+        text = _strip_controls(text).replace("\n", " ").replace("\t", " ")
+        return text[:MAX_INPUT_SUMMARY]
+    except Exception:
+        return ""
+
+
+def _build_input_raw(inp: object) -> str:
+    """Full ``tool_use.input`` serialization for the modal Input section.
+
+    Dicts are pretty-printed via ``json.dumps`` (FR-03) with ``default=str``
+    so unserializable objects (datetime, custom types) don't blow up.
+    Falls back to ``str(inp)`` then ``repr(inp)``. Capped at
+    MAX_INPUT_RAW chars, control chars stripped. Never raises.
+    """
+    try:
+        if inp is None:
+            return ""
+        if isinstance(inp, dict):
+            try:
+                raw = json.dumps(
+                    inp, ensure_ascii=False, default=str, indent=2,
+                )
+            except Exception:
+                try:
+                    raw = repr(inp)
+                except Exception:
+                    return ""
+        else:
+            try:
+                raw = str(inp)
+            except Exception:
+                try:
+                    raw = repr(inp)
+                except Exception:
+                    return ""
+        raw = _strip_controls(raw)
+        return raw[:MAX_INPUT_RAW]
+    except Exception:
+        return ""
+
+
+def _build_output_preview(content: object) -> str:
+    """Normalize ``tool_result.content`` into a single string for the
+    modal Output section (FR-04).
+
+    Handles three observed shapes (per 01_schema_report.md §5):
+      - str: passed through (sanitize + cap)
+      - list[dict]: each block is reduced to its most informative known
+        field. Priority: ``text`` > ``content`` > ``tool_name`` (for
+        tool_reference blocks) > ``type``. Unknown blocks fall back to
+        ``str(block)``.
+      - other: ``str(content)`` fallback.
+
+    Capped at MAX_OUTPUT_PREVIEW chars, control chars stripped.
+    Never raises — bad input drops to empty string.
+    """
+    try:
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                try:
+                    if isinstance(block, dict):
+                        if "text" in block:
+                            parts.append(str(block.get("text", "")))
+                        elif "content" in block:
+                            parts.append(str(block.get("content", "")))
+                        elif "tool_name" in block:
+                            btype = str(block.get("type", "block"))
+                            parts.append(
+                                f"[{btype}: {block.get('tool_name', '')}]"
+                            )
+                        elif "type" in block:
+                            parts.append(f"[{block.get('type', '')}]")
+                        else:
+                            parts.append(str(block))
+                    else:
+                        parts.append(str(block))
+                except Exception:
+                    continue
+            text = "\n".join(parts)
+        else:
+            try:
+                text = str(content)
+            except Exception:
+                return ""
+        text = _strip_controls(text)
+        return text[:MAX_OUTPUT_PREVIEW]
+    except Exception:
+        return ""
+
+
 # Maximum number of distinct tool types tracked per subagent breakdown.
 # Caps memory growth when fed untrusted / extremely diverse payloads.
 MAX_BREAKDOWN_TOOLS = 20
@@ -148,6 +306,21 @@ MAX_HOOK_INFOS = 50
 # Per-turn cap on individual tool event entries for timeline display.
 # Bounds memory growth from high-frequency tool turns.
 MAX_TOOL_EVENTS = 200
+
+# Per-event caps for tool_use/tool_result detail capture (FR-01..FR-04).
+# Each cap bounds the *per-event* string length, not the total number of
+# events (that is still bounded by MAX_TOOL_EVENTS). Together with
+# MAX_TOOL_EVENTS=200 the worst-case per-turn memory is well under a few
+# MB even for adversarial payloads.
+MAX_INPUT_SUMMARY = 200
+MAX_INPUT_RAW = 2048
+MAX_OUTPUT_PREVIEW = 4096
+
+# Single regex compiled once for control-char stripping in input/output
+# capture (FR-05). Strips C0/C1 control chars; preserves printable text,
+# tabs/newlines are dropped so DataTable cells stay single-line-safe for
+# input_summary and so the raw/output blobs don't carry terminal escapes.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 
 # Text patterns Claude Code injects into user rows that LOOK like user
@@ -450,17 +623,41 @@ class CallGraph:
                         ts_epoch_evt = (
                             ev.ts.timestamp() if ev.ts is not None else 0.0
                         )
-                        turn.tool_events.append({
-                            "ts": ts_epoch_evt,
-                            "name": tool,
-                            "agent_id": str(ev.agent_id or ""),
-                            "tool_use_id": tid_evt,
-                            "status": "running",
-                            "duration_ms": None,
-                        })
-                        turn._tool_event_index[tid_evt] = (
-                            len(turn.tool_events) - 1
-                        )
+                        # Detail capture (FR-01..FR-03). All three helpers
+                        # are never-raise; wrap the append itself in
+                        # try/except as a belt-and-suspenders against any
+                        # future regression.
+                        try:
+                            raw_input = ev.payload.get("input")
+                        except Exception:
+                            raw_input = None
+                        try:
+                            input_summary = _build_input_summary(raw_input)
+                        except Exception:
+                            input_summary = ""
+                        try:
+                            input_raw = _build_input_raw(raw_input)
+                        except Exception:
+                            input_raw = ""
+                        try:
+                            turn.tool_events.append({
+                                "ts": ts_epoch_evt,
+                                "name": tool,
+                                "agent_id": str(ev.agent_id or ""),
+                                "tool_use_id": tid_evt,
+                                "status": "running",
+                                "duration_ms": None,
+                                # New detail fields (additive).
+                                "input_summary": input_summary,
+                                "input_raw": input_raw,
+                                "output_preview": "",
+                                "is_error": False,
+                            })
+                            turn._tool_event_index[tid_evt] = (
+                                len(turn.tool_events) - 1
+                            )
+                        except Exception:
+                            pass  # never-raise
         # === end per-turn attribution ===
 
         # Claude Code historically used "Task" for subagent spawns; the
@@ -634,6 +831,15 @@ class CallGraph:
                             evt["duration_ms"] = int(
                                 (ts_epoch_res - start_ts) * 1000
                             )
+                        # Detail capture (FR-04 / FR-10). Always wrap
+                        # never-raise to defend against runaway content.
+                        try:
+                            evt["output_preview"] = _build_output_preview(
+                                ev.payload.get("content")
+                            )
+                        except Exception:
+                            evt["output_preview"] = ""
+                        evt["is_error"] = is_error
         # --- end tool_events timeline ---
 
         node_id = self._tool_use_to_node.get(tid)

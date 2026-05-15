@@ -107,3 +107,15 @@ SessionPathInputScreen {
 /* Active panel border highlight */
 #timeline.panel-active  { border: solid $success; }
 #flowchart.panel-active { border: solid $success; }
+
+/* ToolDetailScreen modal */
+#detail-body {
+    padding: 1 2;
+    height: auto;
+}
+
+#detail-body ScrollableContainer {
+    height: 10;
+    border: solid $surface;
+    margin-bottom: 1;
+}

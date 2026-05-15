@@ -393,6 +393,8 @@ def _build_lines(s: dict[str, Any]) -> list[str]:
 class TurnSummaryScreen(Screen[None]):
     """Full-screen summary of a single turn's orchestration."""
 
+    _tool_timeline_rows: list[dict]
+
     DEFAULT_CSS = """
     TurnSummaryScreen {
         background: $panel;
@@ -455,6 +457,7 @@ class TurnSummaryScreen(Screen[None]):
     def __init__(self, summary: dict[str, Any]) -> None:
         super().__init__()
         self.summary = summary
+        self._tool_timeline_rows = list(summary.get("tool_timeline", []) or [])
 
     def compose(self) -> ComposeResult:
         from datetime import datetime, timezone
@@ -504,7 +507,9 @@ class TurnSummaryScreen(Screen[None]):
             # Section C: Tool Timeline (conditional)
             if tool_timeline:
                 with Vertical(id="turn-section-timeline"):
-                    yield Static(f"[bold]Tool Calls ({len(tool_timeline)} events)[/bold]")
+                    yield Static(
+                        f"[bold]Tool Calls ({len(tool_timeline)} events) — Enter: view details[/bold]"
+                    )
                     table = DataTable(id="turn-tool-timeline")
                     table.add_columns("time", "tool", "agent", "sts", "dur")
                     table.cursor_type = "row"
@@ -534,6 +539,30 @@ class TurnSummaryScreen(Screen[None]):
                     yield table
 
             yield Static("(Esc / Enter to close)", classes="placeholder")
+
+    def on_mount(self) -> None:
+        if self._tool_timeline_rows:
+            self.call_after_refresh(
+                lambda: self.query_one("#turn-tool-timeline", DataTable).focus()
+            )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        row_idx = event.cursor_row
+        if 0 <= row_idx < len(self._tool_timeline_rows):
+            entry = self._tool_timeline_rows[row_idx]
+            from agentlens.panels.detail_modal import ToolDetailScreen
+            self.app.push_screen(ToolDetailScreen(
+                tool_name=entry.get("name", ""),
+                agent_id=entry.get("agent_id", ""),
+                ts=entry.get("ts", 0.0),
+                status=entry.get("status", ""),
+                duration_ms=entry.get("duration_ms"),
+                input_summary=entry.get("input_summary", ""),
+                input_raw=entry.get("input_raw"),
+                output_preview=entry.get("output_preview"),
+                is_error=entry.get("is_error", False),
+                tool_use_id=entry.get("tool_use_id"),
+            ))
 
     def action_dismiss(self) -> None:  # type: ignore[override]
         self.dismiss(None)

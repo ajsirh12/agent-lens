@@ -1030,3 +1030,181 @@ def test_get_turn_summary_prompt_falls_back_to_preview_when_full_empty() -> None
     turn.prompt_full = ""  # simulate legacy turn record (no full capture)
     s = g.get_turn_summary(0)
     assert s["prompt"] == "hi"
+
+
+# ---------------------------------------------------------------------------
+# timeline-toolcall-detail: AC-01 ~ AC-14
+# ---------------------------------------------------------------------------
+
+from agentlens.graph_model import (  # noqa: E402
+    MAX_INPUT_RAW,
+    MAX_INPUT_SUMMARY,
+    _build_input_raw,
+    _build_input_summary,
+    _build_output_preview,
+)
+
+
+def _tcd_use(tool_name: str, inp: object = None, tid: str = "tcd1") -> HarnessEvent:
+    return HarnessEvent(
+        type=EventType.tool_use,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload={"tool_name": tool_name, "tool_use_id": tid, "input": inp},
+    )
+
+
+def _tcd_result(
+    tid: str = "tcd1",
+    content: object = None,
+    is_error: bool = False,
+) -> HarnessEvent:
+    payload: dict = {"tool_use_id": tid, "is_error": is_error}
+    if content is not None:
+        payload["content"] = content
+    return HarnessEvent(
+        type=EventType.tool_result,
+        ts=datetime.now(timezone.utc),
+        agent_id=None,
+        payload=payload,
+    )
+
+
+def test_ac01_read_file_path_summary() -> None:
+    """AC-01: tool_use name=Read, input={file_path: /tmp/x.py} → input_summary == '/tmp/x.py'."""
+    result = _build_input_summary({"file_path": "/tmp/x.py"})
+    assert result == "/tmp/x.py"
+
+
+def test_ac02_command_key_wins_over_description() -> None:
+    """AC-02: input with both 'description' and 'command' → input_summary uses 'command' (higher priority)."""
+    result = _build_input_summary({"description": "desc", "command": "ls -la"})
+    assert result == "ls -la"
+
+
+def test_ac03_unknown_key_falls_back_to_repr() -> None:
+    """AC-03: input={weird_key: weird_value} → input_summary non-empty and ≤200 chars."""
+    result = _build_input_summary({"weird_key": "weird_value"})
+    assert result != ""
+    assert len(result) <= MAX_INPUT_SUMMARY
+
+
+def test_ac04_non_dict_inputs_no_exception() -> None:
+    """AC-04: input=None / str / list all return safely without raising."""
+    assert _build_input_summary(None) == ""
+    result_str = _build_input_summary("raw string")
+    assert isinstance(result_str, str)
+    result_list = _build_input_summary([1, 2, 3])
+    assert isinstance(result_list, str)
+
+    assert _build_input_raw(None) == ""
+    assert isinstance(_build_input_raw("raw string"), str)
+    assert isinstance(_build_input_raw([1, 2, 3]), str)
+
+
+def test_ac05_ansi_stripped_from_input_summary() -> None:
+    """AC-05: ANSI escape sequences are removed from input_summary."""
+    result = _build_input_summary({"command": "ls\x1b[31mred\x1b[0m"})
+    assert "\x1b" not in result
+    assert "\x1b[31m" not in result
+
+
+def test_ac06_long_input_capped() -> None:
+    """AC-06: Very long input values are capped at MAX_INPUT_SUMMARY / MAX_INPUT_RAW."""
+    long_val = "a" * 500
+    summary = _build_input_summary({"prompt": long_val})
+    assert len(summary) <= MAX_INPUT_SUMMARY
+
+    raw = _build_input_raw({"prompt": long_val})
+    assert len(raw) <= MAX_INPUT_RAW
+
+
+def test_ac07_recursive_dict_no_exception() -> None:
+    """AC-07: Recursive / circular dict does not raise; safe fallback returned."""
+    d: dict = {}
+    d["self"] = d  # recursive reference
+    result = _build_input_summary(d)
+    assert isinstance(result, str)
+    result_raw = _build_input_raw(d)
+    assert isinstance(result_raw, str)
+
+
+def test_ac08_tool_result_output_preview_and_is_error() -> None:
+    """AC-08: tool_result(id=X, content='hello', is_error=False) → output_preview='hello', is_error=False."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_tcd_use("Bash", inp={"command": "echo hi"}, tid="x1"))
+    g.update_from_event(_tcd_result(tid="x1", content="hello", is_error=False))
+
+    turn = g.get_turns()[0]
+    evt = turn.tool_events[0]
+    assert evt["output_preview"] == "hello"
+    assert evt["is_error"] is False
+
+
+def test_ac09_content_list_of_text_blocks_joined() -> None:
+    """AC-09: tool_result.content=[{type:text,text:a},{type:text,text:b}] → output_preview contains 'a' and 'b'."""
+    content = [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+    result = _build_output_preview(content)
+    assert "a" in result
+    assert "b" in result
+
+
+def test_ac10_is_error_true_propagates() -> None:
+    """AC-10: tool_result(is_error=True, content='boom') → is_error=True, output_preview contains 'boom'."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_tcd_use("Bash", inp={"command": "bad"}, tid="e1"))
+    g.update_from_event(_tcd_result(tid="e1", content="boom", is_error=True))
+
+    turn = g.get_turns()[0]
+    evt = turn.tool_events[0]
+    assert evt["is_error"] is True
+    assert "boom" in evt["output_preview"]
+
+
+def test_ac11_get_turn_summary_tool_timeline_has_new_keys() -> None:
+    """AC-11: get_turn_summary()['tool_timeline'][0] contains the 4 new detail keys."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_tcd_use("Read", inp={"file_path": "/foo.py"}, tid="r1"))
+
+    s = g.get_turn_summary(0)
+    tl = s["tool_timeline"]
+    assert len(tl) >= 1
+    entry = tl[0]
+    assert "input_summary" in entry
+    assert "input_raw" in entry
+    assert "output_preview" in entry
+    assert "is_error" in entry
+
+
+def test_ac12_get_turn_summary_nonexistent_turn_empty_timeline() -> None:
+    """AC-12: get_turn_summary(99)['tool_timeline'] == []."""
+    g = CallGraph()
+    s = g.get_turn_summary(99)
+    assert s["tool_timeline"] == []
+
+
+def test_ac13_agent_task_skill_excluded_from_tool_events() -> None:
+    """AC-13: tool_use name='Task' / 'Agent' / 'Skill' → not added to tool_events."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+    g.update_from_event(_agent_use("planner", tid="a1"))
+    g.update_from_event(_task_use("executor", tid="t1"))
+    g.update_from_event(_skill_use("ralplan", tid="s1"))
+
+    turn = g.get_turns()[0]
+    assert len(turn.tool_events) == 0
+
+
+def test_ac14_tool_events_cap_at_200() -> None:
+    """AC-14: 201 tool_use events → len(tool_events) == MAX_TOOL_EVENTS (200)."""
+    g = CallGraph()
+    g.update_from_event(_user_message())
+
+    for i in range(MAX_TOOL_EVENTS + 1):
+        g.update_from_event(_tcd_use("Bash", inp={"command": f"cmd-{i}"}, tid=f"cap-{i}"))
+
+    turn = g.get_turns()[0]
+    assert len(turn.tool_events) == MAX_TOOL_EVENTS
