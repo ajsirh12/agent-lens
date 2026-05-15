@@ -63,6 +63,7 @@ class AgentlensApp(App[int]):
         ("[", "prev_turn", "Prev turn"),
         ("]", "next_turn", "Next turn"),
         ("\\", "live_turn", "LIVE turn"),
+        ("r", "replay_turn", "Replay turn"),
         ("escape", "escape_to_timeline", "Back to timeline"),
     ]
 
@@ -100,6 +101,16 @@ class AgentlensApp(App[int]):
         self._subagent_worker: Worker | None = None
         self._active_turn: int | None = None  # None = LIVE (current turn)
         self._activity: ActivityRate = ActivityRate()
+        # Turn replay UX state. Onboarding hint is shown once per process
+        # (design_spec.md D-13). _show_done_marker_until controls the ~2s
+        # lingering ✓ replay done footer marker (FR-9, AC14).
+        self._replay_hint_shown: bool = False
+        self._show_done_marker_until: float = 0.0
+        # Transient footer override (replay hints / errors). When set,
+        # _flowchart_counts_suffix returns this string instead of the
+        # normal suffix until the timestamp expires.
+        self._transient_footer_msg: str | None = None
+        self._transient_footer_until: float = 0.0
 
     def compose(self) -> ComposeResult:
         with Container(id="main"):
@@ -246,6 +257,30 @@ class AgentlensApp(App[int]):
         suffix = f"  nodes: {n} edges: {e}  [{mode_tag}/{orient_tag}/{pane_tag}]"
         if turn_label:
             suffix += f"  {turn_label}"
+        # Replay segment (design_spec.md D-5). Order: running > paused >
+        # done-lingering. ✓ marker expires after _show_done_marker_until.
+        try:
+            state = self._flowchart.get_replay_state()
+        except Exception:
+            state = None
+        if state == "running":
+            f, t = self._flowchart.get_replay_progress()
+            suffix += f"  ▶ replay {f}/{t}"
+        elif state == "paused":
+            f, t = self._flowchart.get_replay_progress()
+            suffix += f"  ‖ replay {f}/{t}"
+        elif state == "done" and time.time() < self._show_done_marker_until:
+            suffix += "  ✓ replay done"
+        # Transient footer override (hints). Appended AFTER replay segment
+        # so a hint is always visible regardless of replay state. Cleared
+        # automatically once the deadline expires.
+        if (
+            self._transient_footer_msg is not None
+            and time.time() < self._transient_footer_until
+        ):
+            suffix += f"  — {self._transient_footer_msg}"
+        elif self._transient_footer_msg is not None:
+            self._transient_footer_msg = None
         return suffix
 
     def _short_session_path(self) -> str:
@@ -298,6 +333,94 @@ class AgentlensApp(App[int]):
         )
         self._footer.update(f"{base}{self._activity_suffix(base)}")
 
+    # --- turn replay helpers ---------------------------------------------
+
+    def _show_transient_footer(
+        self, msg: str, duration: float = 2.0
+    ) -> None:
+        """Show ``msg`` as a footer hint for ``duration`` seconds.
+
+        Cheap implementation: stores the message + expiry timestamp and
+        forces a footer refresh. Subsequent calls overwrite the active
+        hint. Never raises (design_spec.md NFR-1).
+        """
+        try:
+            self._transient_footer_msg = msg
+            self._transient_footer_until = time.time() + max(0.1, duration)
+            self._update_footer()
+            try:
+                self.set_timer(duration, self._update_footer)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _cancel_replay_if_active(self) -> bool:
+        """Cancel replay if the panel is currently animating.
+
+        Returns True if a replay was cancelled. Callers can use this to
+        implement "first-press cancels, second-press performs the action"
+        semantics — but for guard-style use (auto-cancel before nav /
+        mode toggle) the return value is irrelevant.
+        """
+        if self._flowchart is None:
+            return False
+        try:
+            if self._flowchart.is_replaying():
+                self._flowchart.cancel_replay()
+                # Clear the done marker — Esc / nav / toggle should remove
+                # all replay UI immediately.
+                self._show_done_marker_until = 0.0
+                self._update_footer()
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _on_flowchart_replay_done(self) -> None:
+        """Hook invoked by FlowchartPanel when a replay reaches its last
+        frame. Shows the ✓ marker for ~2s and refreshes the footer."""
+        try:
+            self._show_done_marker_until = time.time() + 2.0
+            self._update_footer()
+            try:
+                self.set_timer(2.1, self._update_footer)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _start_replay_for_active_turn(self) -> None:
+        """Attempt to start a turn replay for the currently active turn.
+        Surfaces failures via transient footer hints."""
+        if self._flowchart is None:
+            return
+        if self._active_turn is None:
+            self._show_transient_footer(
+                "replay: select a finished turn first ([/])"
+            )
+            return
+        started, reason = self._flowchart.start_replay(self._active_turn)
+        if not started:
+            hints = {
+                "live": "replay: select a finished turn first ([/])",
+                "empty": "replay: turn is empty",
+                "single": (
+                    "replay: turn has only 1 event — nothing to animate"
+                ),
+            }
+            self._show_transient_footer(
+                hints.get(reason, "replay: cannot start")
+            )
+            return
+        if not self._replay_hint_shown:
+            self._show_transient_footer(
+                "replay: r=pause, Esc=cancel, [/]=jump turn",
+                duration=3.0,
+            )
+            self._replay_hint_shown = True
+        self._update_footer()
+
     def watch_active_panel(self, new_val: str) -> None:
         if self._timeline:
             self._timeline.set_class(new_val == "timeline", "panel-active")
@@ -349,9 +472,58 @@ class AgentlensApp(App[int]):
             self.active_panel = "timeline"
 
     def action_escape_to_timeline(self) -> None:
+        # Esc cancels an in-progress replay first (FR-7). If no replay is
+        # active, fall through to the normal "focus back to timeline"
+        # behavior. The replay cancel intentionally short-circuits to
+        # avoid double-action (cancel + panel switch) on a single Esc.
+        if self._cancel_replay_if_active():
+            return
         self.active_panel = "timeline"
 
+    def action_replay_turn(self) -> None:
+        """Toggle turn replay. See design_spec.md FR-6 / D-11.
+
+        State transitions:
+        - idle → start replay for ``_active_turn``
+        - running → pause
+        - paused → resume
+        - done → restart from frame 0
+        """
+        if self._flowchart is None:
+            return
+        try:
+            state = self._flowchart.get_replay_state()
+        except Exception:
+            state = None
+        if state == "running":
+            try:
+                self._flowchart.pause_replay()
+            except Exception:
+                pass
+            self._update_footer()
+            return
+        if state == "paused":
+            try:
+                self._flowchart.resume_replay()
+            except Exception:
+                pass
+            self._update_footer()
+            return
+        if state == "done":
+            # Restart from frame 0. Clear any lingering ✓ marker first.
+            self._show_done_marker_until = 0.0
+            try:
+                self._flowchart.cancel_replay()
+            except Exception:
+                pass
+            self._start_replay_for_active_turn()
+            return
+        # idle
+        self._start_replay_for_active_turn()
+
     def action_show_detail(self) -> None:
+        # Auto-cancel replay before opening the modal (FR-8).
+        self._cancel_replay_if_active()
         if self._timeline is None:
             return
         turn_idx = self._timeline.get_selected_turn_index()
@@ -368,6 +540,8 @@ class AgentlensApp(App[int]):
         can tell WHY drill-down didn't open (instead of silently
         no-opping).
         """
+        # Auto-cancel replay before opening the modal (FR-8).
+        self._cancel_replay_if_active()
         if self._flowchart is None:
             return
         nid = self.selected_agent_id
@@ -492,6 +666,8 @@ class AgentlensApp(App[int]):
         return out
 
     def action_toggle_mode(self) -> None:
+        # Auto-cancel replay before toggling mode (FR-8).
+        self._cancel_replay_if_active()
         if self._flowchart is not None:
             try:
                 self._flowchart.toggle_mode()
@@ -500,6 +676,8 @@ class AgentlensApp(App[int]):
             self._update_footer()
 
     def action_toggle_orientation(self) -> None:
+        # Auto-cancel replay before toggling orientation (FR-8).
+        self._cancel_replay_if_active()
         if self._flowchart is not None:
             try:
                 self._flowchart.toggle_orientation()
@@ -511,6 +689,8 @@ class AgentlensApp(App[int]):
         """Open the picker on the same slug dir and, on selection, swap
         the active session without restarting the app.
         """
+        # Auto-cancel replay before opening the picker modal (FR-8).
+        self._cancel_replay_if_active()
         locator = SessionLocator(
             cwd=self.project_root or Path.cwd(),
             projects_root=Path.home() / ".claude" / "projects",
@@ -552,6 +732,8 @@ class AgentlensApp(App[int]):
         Provides an escape hatch when the normal slug-based picker
         cannot find the intended session (e.g. Windows path mismatch).
         """
+        # Auto-cancel replay before opening the modal (FR-8).
+        self._cancel_replay_if_active()
 
         def _on_picked(chosen: Path | None) -> None:
             if chosen is None:
@@ -580,6 +762,8 @@ class AgentlensApp(App[int]):
         (horizontal) and stacked (vertical). Applied via a CSS class on
         ``#main`` so the CSS file stays the source of truth for sizing.
         """
+        # Auto-cancel replay before swapping the pane layout (FR-8).
+        self._cancel_replay_if_active()
         try:
             main = self.query_one("#main")
         except Exception:
@@ -599,6 +783,8 @@ class AgentlensApp(App[int]):
 
     def action_prev_turn(self) -> None:
         """Navigate to the previous turn."""
+        # Auto-cancel replay before turn navigation (FR-8).
+        self._cancel_replay_if_active()
         if self._flowchart is None:
             return
         turns = self._flowchart._graph.get_turns()
@@ -614,6 +800,8 @@ class AgentlensApp(App[int]):
 
     def action_next_turn(self) -> None:
         """Navigate to the next turn, or LIVE if at the end."""
+        # Auto-cancel replay before turn navigation (FR-8).
+        self._cancel_replay_if_active()
         if self._flowchart is None:
             return
         turns = self._flowchart._graph.get_turns()
@@ -631,6 +819,8 @@ class AgentlensApp(App[int]):
 
     def action_live_turn(self) -> None:
         """Jump to LIVE (current turn)."""
+        # Auto-cancel replay before returning to LIVE (FR-8).
+        self._cancel_replay_if_active()
         self._active_turn = None
         self._propagate_turn_to_flowchart()
         self._update_footer()
