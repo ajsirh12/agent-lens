@@ -12,6 +12,15 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ### Added
 
+- **Tool Call Detail modal** — Select a tool call in the Tool Calls section
+  of TurnSummaryScreen and press `Enter` to open a detail modal. The modal
+  displays the tool name, agent, status, duration, and timestamp. Input
+  arguments are shown in a dedicated scrollable section (up to 2048 chars);
+  output/result in another (up to 4096 chars). When a tool call errors,
+  the Output header is marked in red.
+- **Tool Calls table auto-focus** — When TurnSummaryScreen opens and the
+  Tool Calls section is non-empty, the DataTable automatically receives
+  focus. Users can immediately navigate and press `Enter` without clicking.
 - **TurnSummaryScreen prompt section** — The full user prompt is now
   displayed in a dedicated independent scroll section at the top of the
   modal body (`#turn-section-prompt`, `height: 1fr`). Multi-line prompts

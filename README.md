@@ -36,7 +36,8 @@ workflow.
   ~1 second via `watchfiles` (stdlib polling fallback included).
 - **Timeline panel** — scrollable table of turns with prompt preview, tool
   count, and duration. Press `Enter` to open a turn detail modal with full
-  prompt, token usage, and per-tool breakdown.
+  prompt, token usage, and per-tool breakdown. Within the modal, select any
+  tool call and press `Enter` again to view its input arguments and output.
 - **Flowchart panel** — directed graph of Agent/Task/Skill calls with
   parent/child edges, `(xN)` duplicate counters, per-subagent tool badges
   (e.g. `Rd12 Ed5`), and color-coded running/done/error status.
