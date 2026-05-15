@@ -12,6 +12,17 @@ user-visible behavior changes, PATCH bumps ship fixes only.
 
 ### Added
 
+- **Turn Replay** (`r` key) — animate a finished turn's events (tool calls,
+  subagent spawns) sequentially in the Flowchart, one node every 400ms.
+  Press `r` on any finished turn in the Timeline to start; press `r` again to
+  pause / resume / restart from frame 0; press `Esc` to cancel and restore the
+  full turn graph. Navigation keys (`[`/`]`/`\`) and modal-opening keys
+  (`Enter`/`d`/`m`/`o`/`p`/`s`/`Shift+S`) cancel an active replay. The
+  Flowchart border title shows `Turn N/T — replay k/K`; the footer status line
+  shows `▶ replay k/K` (running), `‖ replay k/K` (paused), or `✓ replay done`
+  (briefly, on completion). LIVE turns and empty turns surface an inline hint
+  and do nothing. Capped at `MAX_REPLAY_STEPS = 300` events per turn (defensive
+  bound; realistic turns are 5–30 records). 363 tests passing (+15).
 - **Tool Call Detail modal** — Select a tool call in the Tool Calls section
   of TurnSummaryScreen and press `Enter` to open a detail modal. The modal
   displays the tool name, agent, status, duration, and timestamp. Input

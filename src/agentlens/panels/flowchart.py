@@ -7,6 +7,7 @@ Supports two orientations (top-down / left-right) and two display modes
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 from rich.text import Text
@@ -23,6 +24,18 @@ from ..flowchart_layout import (
 )
 from ..graph_model import ROOT_ID, CallGraph, Edge, Node
 from ..messages import HarnessEventMessage
+
+log = logging.getLogger(__name__)
+
+# Replay animation tick interval (seconds). 400ms is the documented UX
+# default (design_spec.md D-2) — fast enough for short turns, slow
+# enough to follow the sequence visually.
+REPLAY_FRAME_INTERVAL_S: float = 0.4
+
+# Defensive cap on replay length. _flow_history is already bounded by
+# MAX_NODES, but very long turns are truncated here so the animation
+# stays under ~2 minutes even at the maximum (design_spec.md NFR-9).
+MAX_REPLAY_STEPS: int = 300
 
 STATUS_STYLE = {
     "running": "bright_green",
@@ -114,15 +127,24 @@ class FlowchartPanel(ScrollableContainer):
         self._selected_flow_vid: str | None = None
         self._selected_nid: str | None = None  # keyboard nav current nid
         self._active_turn: int | None = None
-        self._layout: LayoutResult = self._compute_layout()
-        self._canvas: Static | None = None
-        self._updating = False
         # Deferred-render coalescing: during bulk ingestion (catch-up at
         # startup) many events arrive in the same frame. Instead of calling
         # _compute_layout + _refresh_canvas on every event, we mark the
         # layout as dirty and schedule a single deferred refresh per frame.
         self._layout_dirty: bool = False
         self._refresh_pending: bool = False
+        # Turn replay state machine. None=idle. See design_spec.md D-11.
+        # MUST be initialised before _compute_layout() below because that
+        # method reads _replay_state during the initial layout pass.
+        self._replay_turn: int | None = None
+        self._replay_state: str | None = None  # None | "running" | "paused" | "done"
+        self._replay_frame: int = 0
+        self._replay_total: int = 0
+        self._replay_indices: list[int] = []
+        self._replay_timer: object | None = None  # Textual Timer handle
+        self._layout: LayoutResult = self._compute_layout()
+        self._canvas: Static | None = None
+        self._updating = False
 
     def compose(self) -> ComposeResult:
         self._canvas = Static(self._render_text(), id="flowchart-canvas")
@@ -139,7 +161,34 @@ class FlowchartPanel(ScrollableContainer):
         self.add_event(message.event)
 
     def add_event(self, ev: HarnessEvent) -> None:
+        # Live-turn replay auto-cancel (design_spec.md D-8): if a new
+        # FlowRecord lands on the same turn currently being replayed, the
+        # stored _replay_indices/_replay_total are stale and the replay
+        # sequence becomes meaningless. Detect by snapshotting history
+        # length and comparing the new tail record's turn_index. Never
+        # raises — falls back to normal add_event semantics.
+        history_len_before = 0
+        if (
+            self._replay_state in ("running", "paused")
+            and self._replay_turn is not None
+        ):
+            try:
+                history_len_before = len(self._graph._flow_history)
+            except Exception:
+                history_len_before = 0
         changed = self._graph.update_from_event(ev)
+        if (
+            self._replay_state in ("running", "paused")
+            and self._replay_turn is not None
+        ):
+            try:
+                history = self._graph._flow_history
+                if len(history) > history_len_before:
+                    new_rec = history[-1]
+                    if getattr(new_rec, "turn_index", None) == self._replay_turn:
+                        self.cancel_replay()
+            except Exception:
+                pass
         if changed:
             self._layout_dirty = True
             self._schedule_refresh()
@@ -172,6 +221,9 @@ class FlowchartPanel(ScrollableContainer):
     # ------------------------------------------------------------------
     def clear(self) -> None:
         """Reset the graph + layout to a fresh root-only state."""
+        # Stop any active replay before wiping state so the timer handle
+        # is released cleanly (NFR-6).
+        self.cancel_replay()
         self._graph = CallGraph()
         self._virtual_to_tid = {}
         self._selected_tool_use_id = None
@@ -188,6 +240,204 @@ class FlowchartPanel(ScrollableContainer):
 
     def get_edge_count(self) -> int:
         return len(self._layout.edges)
+
+    # --- turn replay -----------------------------------------------------
+
+    def is_replaying(self) -> bool:
+        """True while replay is running, paused, or in the lingering
+        'done' state. False otherwise."""
+        return self._replay_state is not None
+
+    def get_replay_state(self) -> str | None:
+        """Return current replay state machine value or None when idle."""
+        return self._replay_state
+
+    def get_replay_progress(self) -> tuple[int, int]:
+        """Return ``(frame, total)``. ``(0, 0)`` when no replay is active."""
+        if self._replay_state is None:
+            return (0, 0)
+        return (self._replay_frame, self._replay_total)
+
+    def start_replay(self, turn_index: int) -> tuple[bool, str]:
+        """Try to start replay for ``turn_index`` (0-indexed).
+
+        Returns ``(started, reason)``:
+        - ``(True, "")`` on success.
+        - ``(False, "live")`` if ``turn_index`` is not a finished turn.
+        - ``(False, "empty")`` if the turn has 0 FlowRecords.
+        - ``(False, "single")`` if the turn has only 1 FlowRecord.
+        - ``(False, "error")`` on any unexpected failure (never raises).
+        """
+        try:
+            if turn_index is None or turn_index < 0:
+                return (False, "live")
+            turns = self._graph.get_turns()
+            current = self._graph.get_current_turn_index()
+            # Treat the live turn (current_turn_index) and any index past
+            # the finished-turn range as "not yet replayable". The app's
+            # action layer guards _active_turn separately, but this is the
+            # last defense in case start_replay is called directly.
+            if turns and turn_index >= len(turns):
+                return (False, "live")
+            history = self._graph._flow_history
+            indices = [
+                i for i, r in enumerate(history)
+                if r.turn_index == turn_index
+            ]
+            k = len(indices)
+            if k == 0:
+                return (False, "empty")
+            if k == 1:
+                return (False, "single")
+            # Cap replay length (NFR-9). Truncate stably — the first
+            # MAX_REPLAY_STEPS records are animated, the rest are skipped.
+            if k > MAX_REPLAY_STEPS:
+                indices = indices[:MAX_REPLAY_STEPS]
+                k = MAX_REPLAY_STEPS
+            # Stop any previous timer before re-arming.
+            self._stop_replay_timer()
+            self._replay_turn = turn_index
+            self._replay_indices = indices
+            self._replay_total = k
+            self._replay_frame = 0
+            self._replay_state = "running"
+            # frame 0 renders the prelude only — schedule the actual tick
+            # that adds the first FlowRecord ~400ms later.
+            self._replay_timer = self._arm_replay_timer()
+            self._layout_dirty = True
+            self._schedule_refresh()
+            # current is unused in the success path; reference to silence
+            # any future linters that flag the lookup.
+            _ = current
+            return (True, "")
+        except Exception:
+            log.exception("start_replay failed for turn=%s", turn_index)
+            self._reset_replay_state()
+            return (False, "error")
+
+    def cancel_replay(self) -> None:
+        """Idempotent: stop timer, clear replay state, trigger re-render."""
+        try:
+            if self._replay_state is None and self._replay_timer is None:
+                return
+            self._stop_replay_timer()
+            self._reset_replay_state()
+            self._layout_dirty = True
+            self._schedule_refresh()
+        except Exception:
+            log.exception("cancel_replay failed")
+            self._reset_replay_state()
+
+    def pause_replay(self) -> None:
+        """Pause the currently running replay. No-op if not running."""
+        try:
+            if self._replay_state != "running":
+                return
+            self._stop_replay_timer()
+            self._replay_state = "paused"
+            self._layout_dirty = True
+            self._schedule_refresh()
+        except Exception:
+            log.exception("pause_replay failed")
+
+    def resume_replay(self) -> None:
+        """Resume from the current frame. No-op if not paused."""
+        try:
+            if self._replay_state != "paused":
+                return
+            self._replay_state = "running"
+            self._replay_timer = self._arm_replay_timer()
+            self._layout_dirty = True
+            self._schedule_refresh()
+        except Exception:
+            log.exception("resume_replay failed")
+
+    def _arm_replay_timer(self) -> object | None:
+        """Schedule the next replay tick. Returns the timer handle or
+        ``None`` if the panel is not mounted yet (test contexts)."""
+        try:
+            return self.set_interval(
+                REPLAY_FRAME_INTERVAL_S, self._on_replay_tick
+            )
+        except Exception:
+            # Pre-mount / detached / test harness — no timer; callers
+            # can still drive _on_replay_tick directly.
+            return None
+
+    def _stop_replay_timer(self) -> None:
+        """Stop the replay timer if armed. Idempotent."""
+        timer = self._replay_timer
+        self._replay_timer = None
+        if timer is None:
+            return
+        try:
+            stop = getattr(timer, "stop", None)
+            if callable(stop):
+                stop()
+        except Exception:
+            log.exception("replay timer stop failed")
+
+    def _reset_replay_state(self) -> None:
+        """Wipe all replay attrs back to the idle defaults."""
+        self._replay_turn = None
+        self._replay_state = None
+        self._replay_frame = 0
+        self._replay_total = 0
+        self._replay_indices = []
+
+    def _on_replay_tick(self) -> None:
+        """Advance the replay by one frame. Never raises (NFR-1)."""
+        try:
+            if self._replay_state != "running":
+                return
+            if self._replay_frame >= self._replay_total:
+                # Already at the end — defensive guard.
+                self._stop_replay_timer()
+                self._replay_state = "done"
+                self._layout_dirty = True
+                self._schedule_refresh()
+                self._notify_replay_done()
+                return
+            self._replay_frame += 1
+            if self._replay_frame >= self._replay_total:
+                self._stop_replay_timer()
+                self._replay_state = "done"
+                self._notify_replay_done()
+            self._layout_dirty = True
+            self._schedule_refresh()
+        except Exception:
+            log.exception("replay tick failed")
+            # On any tick failure, cancel rather than retry — leaving a
+            # half-advanced state is worse than a clean stop.
+            try:
+                self.cancel_replay()
+            except Exception:
+                pass
+
+    def _notify_replay_done(self) -> None:
+        """Notify the app that replay completed so it can show the ✓
+        marker. Falls back to a no-op when the app handler is missing
+        (test harness, pre-mount)."""
+        try:
+            app = self.app
+            handler = getattr(app, "_on_flowchart_replay_done", None)
+            if callable(handler):
+                handler()
+        except Exception:
+            pass
+
+    def _replay_border_suffix(self) -> str:
+        """Return the replay portion of the border title, or '' when idle."""
+        state = self._replay_state
+        if state == "running":
+            return f" — replay {self._replay_frame}/{self._replay_total}"
+        if state == "paused":
+            return (
+                f" — replay {self._replay_frame}/{self._replay_total} paused"
+            )
+        if state == "done":
+            return " — replay done"
+        return ""
 
     def get_orientation(self) -> Orientation:
         return self._orientation
@@ -217,6 +467,29 @@ class FlowchartPanel(ScrollableContainer):
     # ------------------------------------------------------------------
     def _compute_layout(self) -> LayoutResult:
         """Filter the graph by current mode, then lay it out."""
+        # Replay branch takes precedence over mode/turn-filter (design_spec.md
+        # D-9). Always renders via _flow_subgraph against a sliced history
+        # view so the displayed graph grows one record at a time.
+        if (
+            self._replay_state in ("running", "paused", "done")
+            and self._replay_turn is not None
+        ):
+            try:
+                if self._replay_frame <= 0:
+                    end = 0  # frame 0: prelude (cross-turn parents) only
+                elif self._replay_frame <= len(self._replay_indices):
+                    end = self._replay_indices[self._replay_frame - 1] + 1
+                else:
+                    end = self._replay_indices[-1] + 1 if self._replay_indices else 0
+                graph = self._flow_subgraph(history_end_index=end)
+            except Exception:
+                # Never raise (NFR-1) — fall back to the empty graph so
+                # the panel keeps rendering even on bad slice math.
+                log.exception("replay layout failed")
+                graph = CallGraph()
+            if self._orientation == "leftright":
+                return layout_leftright(graph)
+            return layout_topdown(graph)
         graph = self._graph
         if self._mode == "all":
             if self._active_turn is not None:
@@ -308,7 +581,9 @@ class FlowchartPanel(ScrollableContainer):
                 )
         return sub
 
-    def _flow_subgraph(self) -> CallGraph:
+    def _flow_subgraph(
+        self, *, history_end_index: int | None = None
+    ) -> CallGraph:
         """Build a flow execution DAG from session-persistent FlowRecords.
 
         Top-level invocations (parent_node_id == ROOT_ID) attach to ROOT,
@@ -317,17 +592,41 @@ class FlowchartPanel(ScrollableContainer):
         of that node_id within the current turn filter; if the parent
         vid is not found (filtered out or dropped), fall back to ROOT.
 
+        ``history_end_index`` slices ``_flow_history`` to ``[:end]`` so
+        the turn-replay animation can render partial graphs without
+        duplicating subgraph logic. ``None`` preserves the full history
+        view (default).
+
         See docs/ROADMAP.md §5-P1 (temporal heuristic removal) and
         §5-P2 (nested tree restoration).
         """
         sub = CallGraph()
 
         history = self._graph._flow_history
+        if history_end_index is not None:
+            # Slice view for replay. _flow_history is a list — slicing is
+            # cheap. clamp negative values to 0 defensively.
+            end = max(0, history_end_index)
+            history = history[:end]
         if not history:
+            # Replay frame 0 with no cross-turn prelude still needs an
+            # empty graph (ROOT-only) rather than a fallback to the live
+            # turn. The early-return below also handles the no-records
+            # case correctly when replay is inactive.
+            if history_end_index is not None:
+                return sub
             return sub
 
         # P5: turn < 0 early return — 첫 user_message 전에는 빈 그래프를 반환한다.
         turn = self._active_turn
+        # During replay the slice already encodes the turn boundary, so
+        # use the replay turn directly when active. This guards against
+        # _active_turn drift between start_replay() and tick.
+        if (
+            self._replay_state in ("running", "paused", "done")
+            and self._replay_turn is not None
+        ):
+            turn = self._replay_turn
         if turn is None:
             turn = self._graph.get_current_turn_index()
         if turn < 0:
@@ -348,10 +647,20 @@ class FlowchartPanel(ScrollableContainer):
         # Step 3: 전체 history에서 running 상태인 부모 FlowRecord를 찾아
         # turn_records 앞에 삽입한다. 부모가 자식보다 먼저 처리되어야
         # last_vid_by_node_id에 부모 vid가 먼저 등록된다.
+        #
+        # NOTE for replay (design_spec.md D-7, AC16): cross-turn parents
+        # live in *prior* turns, so their lookup MUST use the unsliced
+        # _flow_history regardless of history_end_index. The prelude is
+        # rendered at frame 0 in full.
         parent_records: list = []
         if needed_parent_ids:
             remaining = set(needed_parent_ids)
-            for r in history:
+            parent_search_source = (
+                self._graph._flow_history
+                if history_end_index is not None
+                else history
+            )
+            for r in parent_search_source:
                 if r.node_id in remaining and r.status == "running":
                     parent_records.append(r)
                     remaining.discard(r.node_id)
@@ -453,7 +762,8 @@ class FlowchartPanel(ScrollableContainer):
         if self._canvas is None:
             return
         self._canvas.update(self._render_text())
-        # Update border color and title based on turn filter state.
+        # Update border color and title based on turn filter / replay state.
+        replay_suffix = self._replay_border_suffix()
         if self._active_turn is not None:
             turns = self._graph.get_turns()
             total = len(turns)
@@ -461,13 +771,16 @@ class FlowchartPanel(ScrollableContainer):
                 self.styles.border = ("solid", "yellow")
             except Exception:
                 pass
-            self.border_title = f"Turn {self._active_turn + 1}/{total}"
+            base_title = f"Turn {self._active_turn + 1}/{total}"
+            self.border_title = (
+                f"{base_title}{replay_suffix}" if replay_suffix else base_title
+            )
         else:
             try:
                 self.styles.border = ("solid", "$accent")
             except Exception:
                 pass
-            self.border_title = ""
+            self.border_title = replay_suffix.lstrip(" —") if replay_suffix else ""
         # Force re-layout so the Container re-measures its child's size when
         # the flowchart grows beyond its initial canvas dimensions. Without
         # this, Static.update() replaces the content but Textual keeps the

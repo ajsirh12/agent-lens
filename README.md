@@ -46,6 +46,11 @@ workflow.
 - **Parallel-instance view** — in `[running]` mode each parallel spawn is a
   distinct box; in `[all]` mode they aggregate with a `(xN)` counter. Press
   `d` to drill into a specific instance's tool history.
+- **Turn Replay** — press `r` on any finished turn in the Timeline to animate
+  that turn's events (tool calls, subagent spawns) sequentially in the
+  Flowchart, one node every ~400ms. `r` toggles pause / resume / restart;
+  `Esc` cancels. The footer shows `▶ replay k/K` (running) or `‖ replay k/K`
+  (paused). LIVE turns and empty turns are skipped with an inline hint.
 - **Session switching** — press `s` to switch sessions without restarting;
   `Shift+S` to paste a path or UUID directly. Windows / git-bash path formats
   are normalised automatically.

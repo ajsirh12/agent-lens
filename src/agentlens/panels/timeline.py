@@ -271,6 +271,28 @@ class TimelinePanel(Container):
         aid = self._row_agent.get(row_key)
         if aid is None:
             return
+        # Cancel any in-progress flowchart replay when the cursor lands on
+        # a different turn (design_spec.md FR-8). The propagate call below
+        # would push a stale _active_turn into the panel mid-animation.
+        try:
+            flow = getattr(self.app, "_flowchart", None)
+            if flow is not None and flow.is_replaying():
+                target_turn_idx: int | None = None
+                if isinstance(aid, str) and aid.startswith("__turn:"):
+                    try:
+                        target_turn_idx = int(aid.split(":", 1)[1]) - 1
+                    except (ValueError, IndexError):
+                        target_turn_idx = None
+                # Cancel iff the user moved to a different turn. Same-turn
+                # highlights (e.g. cursor returns to its own row after a
+                # refresh) must not interrupt the animation.
+                if (
+                    target_turn_idx is None
+                    or target_turn_idx != flow._replay_turn
+                ):
+                    flow.cancel_replay()
+        except Exception:
+            pass
         # Mark that this agent change originated from the timeline so that
         # _on_app_agent_changed does NOT jump the cursor back to the
         # most-recent row — that would fight the user's manual scroll.
